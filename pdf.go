@@ -27,11 +27,11 @@ fz_stream *wrapped_fz_open_memory(fz_context *ctx, const unsigned char *data, si
 	return stream;
 }
 
-fz_display_list *wrapped_fz_new_display_list_from_page_number(fz_context *ctx, fz_document *doc, int number) {
+fz_display_list *wrapped_fz_new_display_list_from_page(fz_context *ctx, fz_page *page) {
 	fz_display_list *list = NULL;
 	fz_var(list);
 	fz_try(ctx) {
-		list = fz_new_display_list_from_page_number(ctx, doc, number);
+		list = fz_new_display_list_from_page(ctx, page);
 	}
 	fz_catch(ctx) {
 		list = NULL;
@@ -67,14 +67,37 @@ import "C"
 
 import (
 	"bytes"
+	"errors"
 	"image"
-	"image/draw"
+	"math"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
+	"unicode"
 	"unsafe"
+)
 
-	"github.com/richardwilkes/toolbox/errs"
-	"github.com/richardwilkes/toolbox/xmath/geom32"
+// Possible error values
+var (
+	ErrNotPDFData               = errors.New("only PDF documents are supported")
+	ErrUnableToCreatePDFContext = errors.New("unable to create PDF context")
+	ErrInternal                 = errors.New("internal error")
+	ErrUnableToOpenPDF          = errors.New("unable to open PDF")
+	ErrInvalidPageNumber        = errors.New("invalid page number")
+	ErrUnableToLoadPage         = errors.New("unable to load page")
+	ErrUnableToCreateImage      = errors.New("unable to create image")
+)
+
+// AuthenticationStatus holds the result of an authentication attempt. A non-zero value indicates success and the masks
+// can be used to determine further details.
+type AuthenticationStatus byte
+
+// Masks that can be used to examine AuthenticationStatus for additional details.
+const (
+	NoAuthenticationRequiredMask AuthenticationStatus = 1 << iota
+	UserAuthenticatedMask
+	OwnerAuthenticatedMask
 )
 
 // Document represents PDF document.
@@ -85,85 +108,225 @@ type Document struct {
 	lock sync.Mutex
 }
 
+// TOCEntry holds a single entry in the table of contents.
+type TOCEntry struct {
+	Title      string
+	PageNumber int
+	PageX      int
+	PageY      int
+	Children   []*TOCEntry
+}
+
+// PageLink holds a single link on a page. If PageNumber if >= 0, then this is an internal link and the URI will be
+// empty.
+type PageLink struct {
+	PageNumber int
+	PageX      int
+	PageY      int
+	URI        string
+	Bounds     image.Rectangle
+}
+
+// RenderedPage holds the rendered page.
+type RenderedPage struct {
+	Image      *image.NRGBA
+	SearchHits []image.Rectangle
+	Links      []*PageLink
+}
+
 // New returns new PDF document from the provided raw bytes. Pass in 0 for maxCacheSize for no limit.
 func New(buffer []byte, maxCacheSize uint64) (*Document, error) {
 	if !bytes.HasPrefix(buffer, []byte("%PDF")) {
-		return nil, errs.New("only PDF documents are supported")
+		return nil, ErrNotPDFData
 	}
 	var d Document
 	d.ctx = C.fz_new_context_imp(nil, nil, C.size_t(maxCacheSize), C.version)
 	if d.ctx == nil {
-		return nil, errs.New("unable to allocate PDF context")
+		return nil, ErrUnableToCreatePDFContext
 	}
 	C.fz_register_document_handlers(d.ctx)
 	d.data = (*C.uchar)(C.CBytes(buffer))
 	if d.data == nil {
 		d.Release()
-		return nil, errs.New("unable to allocate internal buffer")
+		return nil, ErrInternal
 	}
 	stream := C.wrapped_fz_open_memory(d.ctx, d.data, C.size_t(len(buffer)))
 	if stream == nil {
 		d.Release()
-		return nil, errs.New("unable to allocate internal stream")
+		return nil, ErrInternal
 	}
 	d.doc = C.fz_open_document_with_stream(d.ctx, C.pdfMimeType, stream)
 	C.fz_drop_stream(d.ctx, stream)
 	if d.doc == nil {
 		d.Release()
-		return nil, errs.New("unable to open PDF")
-	}
-	if C.fz_needs_password(d.ctx, d.doc) != 0 {
-		d.Release()
-		return nil, errs.New("unable to open password-protected PDF")
+		return nil, ErrUnableToOpenPDF
 	}
 	runtime.SetFinalizer(&d, func(obj *Document) { obj.Release() })
 	return &d, nil
 }
 
+// RequiresAuthentication returns true if a password is required.
+func (d *Document) RequiresAuthentication() bool {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	return C.fz_needs_password(d.ctx, d.doc) != 0
+}
+
+// Authenticate with either the user or owner password.
+func (d *Document) Authenticate(password string) AuthenticationStatus {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	pw := C.CString(password)
+	defer C.free(unsafe.Pointer(pw))
+	return AuthenticationStatus(C.fz_authenticate_password(d.ctx, d.doc, pw))
+}
+
+// TableOfContents returns the table of contents for this document, if any.
+func (d *Document) TableOfContents(dpi int) []*TOCEntry {
+	outline := C.fz_load_outline(d.ctx, d.doc)
+	if outline == nil {
+		return nil
+	}
+	defer C.fz_drop_outline(d.ctx, outline)
+	return buildTOCEntries(outline, float32(dpi)/72)
+}
+
+func buildTOCEntries(outline *C.fz_outline, scale float32) []*TOCEntry {
+	var entries []*TOCEntry
+	for outline != nil {
+		entry := &TOCEntry{
+			PageNumber: int(outline.page),
+			PageX:      int(math.Floor(float64(outline.x) * float64(scale))),
+			PageY:      int(math.Floor(float64(outline.y) * float64(scale))),
+		}
+		if outline.title != nil {
+			entry.Title = sanitizeString(outline.title)
+		}
+		entries = append(entries, entry)
+		if outline.down != nil {
+			entry.Children = buildTOCEntries(outline.down, scale)
+		}
+		outline = outline.next
+	}
+	return entries
+}
+
+func sanitizeString(in *C.char) string {
+	str := C.GoString(in)
+	sanitized := make([]rune, 0, len(str))
+	for _, ch := range str {
+		if !unicode.IsControl(ch) && unicode.IsPrint(ch) {
+			sanitized = append(sanitized, ch)
+		}
+	}
+	return strings.TrimSpace(string(sanitized))
+}
+
 // PageCount returns total number of pages in the document.
 func (d *Document) PageCount() int {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	return int(C.fz_count_pages(d.ctx, d.doc))
 }
 
 // RenderPage renders the specified page at the requested dpi. If search is not empty, then the bounding boxes of up to
 // maxHits matching text on the page will be returned.
-func (d *Document) RenderPage(pageNumber int, dpi float32, search string, maxHits int) (draw.Image, []geom32.Rect, error) {
+func (d *Document) RenderPage(pageNumber, dpi, maxHits int, search string) (*RenderedPage, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	pageCount := d.PageCount()
-	if pageNumber >= d.PageCount() {
-		return nil, nil, errs.Newf("page number %d is out of range (0-%d)", pageNumber, pageCount)
+	pageCount := int(C.fz_count_pages(d.ctx, d.doc))
+	if pageNumber >= pageCount {
+		return nil, ErrInvalidPageNumber
 	}
-	displayList := C.wrapped_fz_new_display_list_from_page_number(d.ctx, d.doc, C.int(pageNumber))
+	page := C.fz_load_page(d.ctx, d.doc, C.int(pageNumber))
+	if page == nil {
+		return nil, ErrUnableToLoadPage
+	}
+	defer C.fz_drop_page(d.ctx, page)
+	displayList := C.wrapped_fz_new_display_list_from_page(d.ctx, page)
 	defer C.fz_drop_display_list(d.ctx, displayList)
-	scale := dpi / 72
+	scale := float64(dpi) / 72
+	img := d.renderPage(displayList, scale)
+	if img == nil {
+		return nil, ErrUnableToCreateImage
+	}
+	return &RenderedPage{
+		Image:      img,
+		SearchHits: d.searchDisplayList(displayList, scale, search, maxHits),
+		Links:      d.loadLinks(page, scale),
+	}, nil
+}
+
+func (d *Document) renderPage(displayList *C.fz_display_list, scale float64) *image.NRGBA {
 	ctm := C.fz_scale(C.float(scale), C.float(scale))
-	pixmap := C.wrapped_fz_new_pixmap_from_display_list(d.ctx, displayList, ctm, C.fz_device_rgb(d.ctx), 1)
+	cs := C.fz_device_rgb(d.ctx)
+	pixmap := C.wrapped_fz_new_pixmap_from_display_list(d.ctx, displayList, ctm, cs, 1)
+	defer C.fz_drop_pixmap(d.ctx, pixmap)
 	pixels := C.fz_pixmap_samples(d.ctx, pixmap)
 	if pixels == nil {
-		return nil, nil, errs.New("unable to obtain pixels")
+		return nil
 	}
-	var boxes []geom32.Rect
+	return &image.NRGBA{
+		Pix:    C.GoBytes(unsafe.Pointer(pixels), 4*pixmap.w*pixmap.h),
+		Stride: int(pixmap.stride),
+		Rect:   image.Rect(0, 0, int(pixmap.w), int(pixmap.h)),
+	}
+}
+
+func (d *Document) searchDisplayList(displayList *C.fz_display_list, scale float64, search string, maxHits int) []image.Rectangle {
+	var boxes []image.Rectangle
 	if search != "" {
 		searchText := C.CString(search)
 		defer C.free(unsafe.Pointer(searchText))
-		hitBoxes := make([]C.fz_quad, maxHits)
-		hits := C.wrapped_fz_search_display_list(d.ctx, displayList, searchText, (*C.fz_quad)(unsafe.Pointer(&hitBoxes[0])), C.int(len(hitBoxes)))
+		quads := make([]C.fz_quad, maxHits)
+		hits := C.wrapped_fz_search_display_list(d.ctx, displayList, searchText, (*C.fz_quad)(unsafe.Pointer(&quads[0])), C.int(len(quads)))
 		if hits > 0 {
-			boxes = make([]geom32.Rect, hits)
+			boxes = make([]image.Rectangle, hits)
 			for i := range boxes {
-				boxes[i].X = float32(hitBoxes[i].ul.x) * scale
-				boxes[i].Y = float32(hitBoxes[i].ul.y) * scale
-				boxes[i].Width = (1 + float32(hitBoxes[i].lr.x-hitBoxes[i].ul.x)) * scale
-				boxes[i].Height = (1 + float32(hitBoxes[i].lr.y-hitBoxes[i].ul.y)) * scale
+				boxes[i] = image.Rect(int(math.Floor(math.Min(float64(quads[i].ul.x), float64(quads[i].ll.x))*scale)),
+					int(math.Floor(math.Min(float64(quads[i].ul.y), float64(quads[i].ur.y))*scale)),
+					int(math.Ceil(math.Max(float64(quads[i].ur.x), float64(quads[i].lr.x))*scale)),
+					int(math.Ceil(math.Max(float64(quads[i].ll.y), float64(quads[i].lr.y))*scale)),
+				)
 			}
 		}
 	}
-	return &image.NRGBA{
-		Pix:    C.GoBytes(unsafe.Pointer(pixels), C.int(4*pixmap.w*pixmap.h)),
-		Stride: int(pixmap.stride),
-		Rect:   image.Rect(0, 0, int(pixmap.w), int(pixmap.h)),
-	}, boxes, nil
+	return boxes
+}
+
+func (d *Document) loadLinks(page *C.fz_page, scale float64) []*PageLink {
+	var links []*PageLink
+	if link := C.fz_load_links(d.ctx, page); link != nil {
+		firstLink := link
+		for link != nil {
+			pageLink := &PageLink{
+				PageNumber: -1,
+				URI:        sanitizeString(link.uri),
+				Bounds: image.Rect(int(math.Floor(float64(link.rect.x0)*scale)),
+					int(math.Floor(float64(link.rect.y0)*scale)),
+					int(math.Ceil(float64(link.rect.x1)*scale)),
+					int(math.Ceil(float64(link.rect.y1)*scale)),
+				),
+			}
+			if strings.HasPrefix(pageLink.URI, "#") {
+				parts := strings.Split(pageLink.URI, ",")
+				pageLink.PageNumber, _ = strconv.Atoi(parts[0][1:]) //nolint:errcheck // Failure here results in 0, which is acceptable
+				if len(parts) > 2 {
+					if x, err := strconv.ParseFloat(parts[1], 32); err != nil {
+						pageLink.PageX = int(math.Floor(x * scale))
+					}
+					if y, err := strconv.ParseFloat(parts[2], 32); err != nil {
+						pageLink.PageY = int(math.Floor(y * scale))
+					}
+				}
+				pageLink.URI = ""
+			}
+			links = append(links, pageLink)
+			link = link.next
+		}
+		C.fz_drop_link(d.ctx, firstLink)
+	}
+	return links
 }
 
 // Release the underlying PDF document, releasing any resources. It is not necessary to call this, as garbage collection
