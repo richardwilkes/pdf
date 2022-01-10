@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"image"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -102,7 +103,13 @@ func TestPDF(t *testing.T) {
 		t.Errorf("expected an image bounds of %v, got %v", expectedBounds, page.Image.Rect)
 	}
 	sum := sha1.Sum(page.Image.Pix)
-	if base64.RawStdEncoding.EncodeToString(sum[:]) != "3CRKsj+/0NEYpAjdkTGBfPvLufg" {
+	var expected string
+	if runtime.GOOS != "windows" {
+		expected = "3CRKsj+/0NEYpAjdkTGBfPvLufg"
+	} else {
+		expected = "1kyvOn48i4kVlKIfNyBoqb51uEQ" // Windows has a different value due to subtle differences in font display
+	}
+	if base64.RawStdEncoding.EncodeToString(sum[:]) != expected {
 		t.Error("rendered image doesn't match expectation")
 	}
 }
