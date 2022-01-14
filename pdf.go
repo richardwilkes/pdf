@@ -311,6 +311,7 @@ func (d *Document) loadLinks(page *C.fz_page, scale float64) []*PageLink {
 			if strings.HasPrefix(pageLink.URI, "#") {
 				parts := strings.Split(pageLink.URI, ",")
 				pageLink.PageNumber, _ = strconv.Atoi(parts[0][1:]) //nolint:errcheck // Failure here results in 0, which is acceptable
+				pageLink.PageNumber--                               // Page numbers in links seem to be 1-based, but we use 0-based internally
 				if len(parts) > 2 {
 					if x, err := strconv.ParseFloat(parts[1], 32); err != nil {
 						pageLink.PageX = int(math.Floor(x * scale))
