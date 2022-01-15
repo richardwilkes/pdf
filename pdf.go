@@ -183,6 +183,8 @@ func (d *Document) Authenticate(password string) AuthenticationStatus {
 
 // TableOfContents returns the table of contents for this document, if any.
 func (d *Document) TableOfContents(dpi int) []*TOCEntry {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	outline := C.fz_load_outline(d.ctx, d.doc)
 	if outline == nil {
 		return nil
