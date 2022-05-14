@@ -39,9 +39,9 @@ func TestPDF(t *testing.T) {
 	}
 
 	// This particular PDF has ridiculously long TOC headings, so just spot-check a few
-	checkTOCEntry(t, toc, 0, "GLAIVE Mini (GMi) ", 0, 69, 162)
-	checkTOCEntry(t, toc, 12, "Semibalanced: A new ", 0, 81, 679)
-	checkTOCEntry(t, toc, 60, "What's that odd ", 1, 447, 690)
+	checkTOCEntry(t, toc, 0, "GLAIVE Mini (GMi) ", 0, 69, 163)
+	checkTOCEntry(t, toc, 12, "Semibalanced: A new ", 0, 81, 680)
+	checkTOCEntry(t, toc, 60, "What's that odd ", 1, 446, 691)
 
 	// Render the first page
 	var page *pdf.RenderedPage
@@ -105,7 +105,7 @@ func TestPDF(t *testing.T) {
 	sum := sha1.Sum(page.Image.Pix)
 	var expected string
 	if runtime.GOOS != "windows" {
-		expected = "3CRKsj+/0NEYpAjdkTGBfPvLufg"
+		expected = "/zVQwB1j73JopAxP9db/qig1mU4"
 	} else {
 		expected = "1kyvOn48i4kVlKIfNyBoqb51uEQ" // Windows has a different value due to subtle differences in font display
 	}

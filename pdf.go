@@ -51,11 +51,11 @@ fz_pixmap *wrapped_fz_new_pixmap_from_display_list(fz_context *ctx, fz_display_l
 	return pixmap;
 }
 
-int wrapped_fz_search_display_list(fz_context *ctx, fz_display_list *list, const char *needle, fz_quad *hit_bbox, int hit_max) {
+int wrapped_fz_search_display_list(fz_context *ctx, fz_display_list *list, const char *needle, int *hit_mark, fz_quad *hit_bbox, int hit_max) {
 	int hits = 0;
 	fz_var(hits);
 	fz_try(ctx) {
-		hits = fz_search_display_list(ctx, list, needle, hit_bbox, hit_max);
+		hits = fz_search_display_list(ctx, list, needle, hit_mark, hit_bbox, hit_max);
 	}
 	fz_catch(ctx) {
 		hits = 0;
@@ -197,7 +197,7 @@ func buildTOCEntries(outline *C.fz_outline, scale float32) []*TOCEntry {
 	var entries []*TOCEntry
 	for outline != nil {
 		entry := &TOCEntry{
-			PageNumber: int(outline.page),
+			PageNumber: int(outline.page.page),
 			PageX:      int(math.Floor(float64(outline.x) * float64(scale))),
 			PageY:      int(math.Floor(float64(outline.y) * float64(scale))),
 		}
@@ -281,7 +281,7 @@ func (d *Document) searchDisplayList(displayList *C.fz_display_list, scale float
 		searchText := C.CString(search)
 		defer C.free(unsafe.Pointer(searchText))
 		quads := make([]C.fz_quad, maxHits)
-		hits := C.wrapped_fz_search_display_list(d.ctx, displayList, searchText, (*C.fz_quad)(unsafe.Pointer(&quads[0])), C.int(len(quads)))
+		hits := C.wrapped_fz_search_display_list(d.ctx, displayList, searchText, nil, (*C.fz_quad)(unsafe.Pointer(&quads[0])), C.int(len(quads)))
 		if hits > 0 {
 			boxes = make([]image.Rectangle, hits)
 			for i := range boxes {
