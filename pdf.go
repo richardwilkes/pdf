@@ -121,8 +121,6 @@ type TOCEntry struct {
 // empty.
 type PageLink struct {
 	PageNumber int
-	PageX      int
-	PageY      int
 	URI        string
 	Bounds     image.Rectangle
 }
@@ -311,20 +309,20 @@ func (d *Document) loadLinks(page *C.fz_page, scale float64) []*PageLink {
 				),
 			}
 			if strings.HasPrefix(pageLink.URI, "#") {
-				parts := strings.Split(pageLink.URI, ",")
-				pageLink.PageNumber, _ = strconv.Atoi(parts[0][1:]) //nolint:errcheck // Failure here results in 0, which is acceptable
-				pageLink.PageNumber--                               // Page numbers in links seem to be 1-based, but we use 0-based internally
-				if len(parts) > 2 {
-					if x, err := strconv.ParseFloat(parts[1], 32); err != nil {
-						pageLink.PageX = int(math.Floor(x * scale))
+				const pagePrefix = "#page="
+				if i := strings.Index(pageLink.URI, pagePrefix); i != -1 {
+					pageLink.URI = pageLink.URI[i+len(pagePrefix):]
+					if i = strings.Index(pageLink.URI, "&"); i != -1 {
+						pageLink.URI = pageLink.URI[:i]
 					}
-					if y, err := strconv.ParseFloat(parts[2], 32); err != nil {
-						pageLink.PageY = int(math.Floor(y * scale))
-					}
+					pageLink.PageNumber, _ = strconv.Atoi(pageLink.URI) //nolint:errcheck // Failure here results in 0, which is acceptable
+					pageLink.PageNumber--                               // Page numbers in links seem to be 1-based, but we use 0-based internally
 				}
 				pageLink.URI = ""
 			}
-			links = append(links, pageLink)
+			if pageLink.PageNumber != -1 || pageLink.URI != "" {
+				links = append(links, pageLink)
+			}
 			link = link.next
 		}
 		C.fz_drop_link(d.ctx, firstLink)
