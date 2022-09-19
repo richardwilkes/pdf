@@ -63,7 +63,6 @@ linters:
     - goimports
     - gosimple
     - govet
-    - ifshort
     - ineffassign
     - misspell
     - noctx
@@ -71,11 +70,9 @@ linters:
     - predeclared
     - revive
     - staticcheck
-    - structcheck
     - unconvert
     - unused
     - varcheck
-    - wastedassign
 issues:
   max-same-issues: 10
   exclude-use-default: false
