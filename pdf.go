@@ -267,7 +267,7 @@ func (d *Document) renderPage(displayList *C.fz_display_list, scale float64) *im
 		return nil
 	}
 	return &image.NRGBA{
-		Pix:    C.GoBytes(unsafe.Pointer(pixels), pixmap.stride*pixmap.h),
+		Pix:    C.GoBytes(unsafe.Pointer(pixels), C.int(int(pixmap.stride)*int(pixmap.h))),
 		Stride: int(pixmap.stride),
 		Rect:   image.Rect(0, 0, int(pixmap.w), int(pixmap.h)),
 	}
