@@ -188,7 +188,7 @@ func (d *Document) TableOfContents(dpi int) []*TOCEntry {
 		return nil
 	}
 	defer C.fz_drop_outline(d.ctx, outline)
-	return buildTOCEntries(outline, float32(dpi)/72)
+	return buildTOCEntries(outline, float32(dpiToScale(dpi)))
 }
 
 func buildTOCEntries(outline *C.fz_outline, scale float32) []*TOCEntry {
@@ -229,6 +229,14 @@ func (d *Document) PageCount() int {
 	return int(C.fz_count_pages(d.ctx, d.doc))
 }
 
+func dpiToScale(dpi int) float64 {
+	scale := float64(dpi) / 72
+	if scale > 10 {
+		return 10 // Limit scaling to 10x; some displays report bad EDID data, causing the input DPI from programs to be wildly off
+	}
+	return scale
+}
+
 // RenderPage renders the specified page at the requested dpi. If search is not empty, then the bounding boxes of up to
 // maxHits matching text on the page will be returned.
 func (d *Document) RenderPage(pageNumber, dpi, maxHits int, search string) (*RenderedPage, error) {
@@ -245,7 +253,7 @@ func (d *Document) RenderPage(pageNumber, dpi, maxHits int, search string) (*Ren
 	defer C.fz_drop_page(d.ctx, page)
 	displayList := C.wrapped_fz_new_display_list_from_page(d.ctx, page)
 	defer C.fz_drop_display_list(d.ctx, displayList)
-	scale := float64(dpi) / 72
+	scale := dpiToScale(dpi)
 	img := d.renderPage(displayList, scale)
 	if img == nil {
 		return nil, ErrUnableToCreateImage
@@ -261,13 +269,20 @@ func (d *Document) renderPage(displayList *C.fz_display_list, scale float64) *im
 	ctm := C.fz_scale(C.float(scale), C.float(scale))
 	cs := C.fz_device_rgb(d.ctx)
 	pixmap := C.wrapped_fz_new_pixmap_from_display_list(d.ctx, displayList, ctm, cs, 1)
+	if pixmap == nil {
+		return nil
+	}
 	defer C.fz_drop_pixmap(d.ctx, pixmap)
 	pixels := C.fz_pixmap_samples(d.ctx, pixmap)
 	if pixels == nil {
 		return nil
 	}
+	size := int(pixmap.stride) * int(pixmap.h)
+	if size <= 0 || size > math.MaxInt32 {
+		return nil
+	}
 	return &image.NRGBA{
-		Pix:    C.GoBytes(unsafe.Pointer(pixels), C.int(int(pixmap.stride)*int(pixmap.h))),
+		Pix:    C.GoBytes(unsafe.Pointer(pixels), C.int(size)),
 		Stride: int(pixmap.stride),
 		Rect:   image.Rect(0, 0, int(pixmap.w), int(pixmap.h)),
 	}
