@@ -80,8 +80,18 @@ int pdf_is_indirect(fz_context *ctx, pdf_obj *obj);
 */
 int pdf_obj_num_is_stream(fz_context *ctx, pdf_document *doc, int num);
 int pdf_is_stream(fz_context *ctx, pdf_obj *obj);
+
+/* Compare 2 objects. Returns 0 on match, non-zero on mismatch.
+ * Streams always mismatch.
+ */
 int pdf_objcmp(fz_context *ctx, pdf_obj *a, pdf_obj *b);
 int pdf_objcmp_resolve(fz_context *ctx, pdf_obj *a, pdf_obj *b);
+
+/* Compare 2 objects. Returns 0 on match, non-zero on mismatch.
+ * Stream contents are explicitly checked.
+ */
+int pdf_objcmp_deep(fz_context *ctx, pdf_obj *a, pdf_obj *b);
+
 int pdf_name_eq(fz_context *ctx, pdf_obj *a, pdf_obj *b);
 
 int pdf_obj_marked(fz_context *ctx, pdf_obj *obj);
@@ -190,6 +200,7 @@ pdf_obj *pdf_dict_puts_dict(fz_context *ctx, pdf_obj *dict, const char *key, int
 
 int pdf_dict_get_bool(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
 int pdf_dict_get_int(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
+int64_t pdf_dict_get_int64(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
 float pdf_dict_get_real(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
 const char *pdf_dict_get_name(fz_context *ctx, pdf_obj *dict, pdf_obj *key);
 const char *pdf_dict_get_string(fz_context *ctx, pdf_obj *dict, pdf_obj *key, size_t *sizep);
@@ -262,8 +273,39 @@ fz_rect pdf_to_rect(fz_context *ctx, pdf_obj *array);
 fz_matrix pdf_to_matrix(fz_context *ctx, pdf_obj *array);
 int64_t pdf_to_date(fz_context *ctx, pdf_obj *time);
 
+/*
+	pdf_get_indirect_document and pdf_get_bound_document are
+	now deprecated. Please do not use them in future. They will
+	be removed.
+
+	Please use pdf_pin_document instead.
+*/
 pdf_document *pdf_get_indirect_document(fz_context *ctx, pdf_obj *obj);
 pdf_document *pdf_get_bound_document(fz_context *ctx, pdf_obj *obj);
+
+/*
+	pdf_pin_document returns a new reference to the document
+	to which obj is bound. The caller is responsible for
+	dropping this reference once they have finished with it.
+
+	This is a replacement for pdf_get_indirect_document
+	and pdf_get_bound_document that are now deprecated. Those
+	returned a borrowed reference that did not need to be
+	dropped.
+
+	Note that this can validly return NULL in various cases:
+	1) When the object is of a simple type (such as a number
+	or a string), it contains no reference to the enclosing
+	document. 2) When the object has yet to be inserted into
+	a PDF document (such as during parsing). 3) And (in
+	future versions) when the document has been destroyed
+	but the object reference remains.
+
+	It is the caller's responsibility to deal with a NULL
+	return here.
+*/
+pdf_document *pdf_pin_document(fz_context *ctx, pdf_obj *obj);
+
 void pdf_set_int(fz_context *ctx, pdf_obj *obj, int64_t i);
 
 /* Voodoo to create PDF_NAME(Foo) macros from name-table.h */

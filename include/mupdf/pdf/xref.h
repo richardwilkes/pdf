@@ -93,11 +93,34 @@ struct pdf_xref
 	int64_t end_ofs; /* file offset to end of xref */
 };
 
+/**
+	Retrieve the pdf_xref_entry for a given object.
+
+	This can cause xref reorganisations (solidifications etc) due to
+	repairs, so all held pdf_xref_entries should be considered
+	invalid after this call (other than the returned one).
+*/
 pdf_xref_entry *pdf_cache_object(fz_context *ctx, pdf_document *doc, int num);
 
 int pdf_count_objects(fz_context *ctx, pdf_document *doc);
+
+/**
+	Resolve an indirect object (or chain of objects).
+
+	This can cause xref reorganisations (solidifications etc) due to
+	repairs, so all held pdf_xref_entries should be considered
+	invalid after this call (other than the returned one).
+*/
 pdf_obj *pdf_resolve_indirect(fz_context *ctx, pdf_obj *ref);
 pdf_obj *pdf_resolve_indirect_chain(fz_context *ctx, pdf_obj *ref);
+
+/**
+	Load a given object.
+
+	This can cause xref reorganisations (solidifications etc) due to
+	repairs, so all held pdf_xref_entries should be considered
+	invalid after this call (other than the returned one).
+*/
 pdf_obj *pdf_load_object(fz_context *ctx, pdf_document *doc, int num);
 pdf_obj *pdf_load_unencrypted_object(fz_context *ctx, pdf_document *doc, int num);
 
@@ -132,7 +155,7 @@ fz_stream *pdf_open_stream(fz_context *ctx, pdf_obj *ref);
 	constraining to stream length, and without decryption.
 */
 fz_stream *pdf_open_inline_stream(fz_context *ctx, pdf_document *doc, pdf_obj *stmobj, int length, fz_stream *chain, fz_compression_params *params);
-fz_compressed_buffer *pdf_load_compressed_stream(fz_context *ctx, pdf_document *doc, int num);
+fz_compressed_buffer *pdf_load_compressed_stream(fz_context *ctx, pdf_document *doc, int num, size_t worst_case);
 void pdf_load_compressed_inline_image(fz_context *ctx, pdf_document *doc, pdf_obj *dict, int length, fz_stream *cstm, int indexed, fz_compressed_image *image);
 fz_stream *pdf_open_stream_with_offset(fz_context *ctx, pdf_document *doc, int num, pdf_obj *dict, int64_t stm_ofs);
 fz_stream *pdf_open_contents_stream(fz_context *ctx, pdf_document *doc, pdf_obj *obj);
@@ -155,8 +178,30 @@ pdf_xref_entry *pdf_get_populating_xref_entry(fz_context *ctx, pdf_document *doc
 	This will never throw anything, or return NULL if it is
 	only asked to return objects in range within a 'solid'
 	xref.
+
+	This may "solidify" the xref (so can cause allocations).
 */
 pdf_xref_entry *pdf_get_xref_entry(fz_context *ctx, pdf_document *doc, int i);
+
+/*
+	Map a function across all xref entries in a document.
+*/
+void pdf_xref_entry_map(fz_context *ctx, pdf_document *doc, void (*fn)(fz_context *, pdf_xref_entry *, int i, pdf_document *doc, void *), void *arg);
+
+
+/*
+	Used after loading a document to access entries.
+
+	This will never throw anything, or return NULL if it is
+	only asked to return objects in range within a 'solid'
+	xref.
+
+	This will never "solidify" the xref, so no entry may be found
+	(NULL will be returned) for free entries.
+
+	Called with a valid i, this will never try/catch or throw.
+*/
+pdf_xref_entry *pdf_get_xref_entry_no_change(fz_context *ctx, pdf_document *doc, int i);
 pdf_xref_entry *pdf_get_xref_entry_no_null(fz_context *ctx, pdf_document *doc, int i);
 void pdf_replace_xref(fz_context *ctx, pdf_document *doc, pdf_xref_entry *entries, int n);
 void pdf_forget_xref(fz_context *ctx, pdf_document *doc);

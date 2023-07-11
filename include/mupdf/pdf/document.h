@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2022 Artifex Software, Inc.
+// Copyright (C) 2004-2023 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -424,15 +424,17 @@ struct pdf_document
 	pdf_xref *saved_xref_sections;
 	int *xref_index;
 	int save_in_progress;
-	int has_xref_streams;
-	int has_old_style_xrefs;
+	int last_xref_was_old_style;
 	int has_linearization_object;
 
-	int rev_page_count;
+	int map_page_count;
 	pdf_rev_page_map *rev_page_map;
+	pdf_obj **fwd_page_map;
+	int page_tree_broken;
 
 	int repair_attempted;
 	int repair_in_progress;
+	int non_structural_change; /* True if we are modifying the document in a way that does not change the (page) structure */
 
 	/* State indicating which file parsing method we are using */
 	int file_reading_linearly;
@@ -488,7 +490,6 @@ struct pdf_document
 	int num_type3_fonts;
 	int max_type3_fonts;
 	fz_font **type3_fonts;
-	int type3_lock;
 
 	struct {
 		fz_hash_table *fonts;
@@ -575,6 +576,7 @@ void pdf_graft_mapped_page(fz_context *ctx, pdf_graft_map *map, int page_to, pdf
 	pdf operations, together with a set of resources. This
 	sequence/set pair can then be used as the basis for
 	adding a page to the document (see pdf_add_page).
+	Returns a kept reference.
 
 	doc: The document for which these are intended.
 
@@ -631,9 +633,11 @@ pdf_obj *pdf_add_page(fz_context *ctx, pdf_document *doc, fz_rect mediabox, int 
 
 	doc: The document to insert into.
 
-	at: The page number to insert at. 0 inserts at the start.
-	negative numbers, or INT_MAX insert at the end. Otherwise
-	n inserts after page n.
+	at: The page number to insert at (pages numbered from 0).
+	0 <= n <= page_count inserts before page n. Negative numbers
+	or INT_MAX are treated as page count, and insert at the end.
+	0 inserts at the start. All existing pages are after the
+	insertion point are shuffled up.
 
 	page: The page to insert.
 */
@@ -663,6 +667,24 @@ void pdf_delete_page(fz_context *ctx, pdf_document *doc, int number);
 	will be taken to be the end of the document.
 */
 void pdf_delete_page_range(fz_context *ctx, pdf_document *doc, int start, int end);
+
+/*
+	Get page label (string) from a page number (index).
+*/
+void pdf_page_label(fz_context *ctx, pdf_document *doc, int page, char *buf, int size);
+void pdf_page_label_imp(fz_context *ctx, fz_document *doc, int chapter, int page, char *buf, int size);
+
+typedef enum {
+	PDF_PAGE_LABEL_NONE = 0,
+	PDF_PAGE_LABEL_DECIMAL = 'D',
+	PDF_PAGE_LABEL_ROMAN_UC = 'R',
+	PDF_PAGE_LABEL_ROMAN_LC = 'r',
+	PDF_PAGE_LABEL_ALPHA_UC = 'A',
+	PDF_PAGE_LABEL_ALPHA_LC = 'a',
+} pdf_page_label_style;
+
+void pdf_set_page_labels(fz_context *ctx, pdf_document *doc, int index, pdf_page_label_style style, const char *prefix, int start);
+void pdf_delete_page_labels(fz_context *ctx, pdf_document *doc, int index);
 
 fz_text_language pdf_document_language(fz_context *ctx, pdf_document *doc);
 void pdf_set_document_language(fz_context *ctx, pdf_document *doc, fz_text_language lang);

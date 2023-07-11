@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2022 Artifex Software, Inc.
+// Copyright (C) 2004-2023 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -297,6 +297,11 @@ fz_link_dest pdf_parse_link_uri(fz_context *ctx, const char *uri);
 fz_matrix pdf_annot_transform(fz_context *ctx, pdf_annot *annot);
 
 /*
+	Create a new link object.
+*/
+fz_link *pdf_new_link(fz_context *ctx, pdf_page *page, fz_rect rect, const char *uri, pdf_obj *obj);
+
+/*
 	create a new annotation of the specified type on the
 	specified page. The returned pdf_annot structure is owned by the
 	page and does not need to be freed.
@@ -308,6 +313,26 @@ pdf_annot *pdf_create_annot_raw(fz_context *ctx, pdf_page *page, enum pdf_annot_
 	structure is owned by the page and does not need to be freed.
 */
 fz_link *pdf_create_link(fz_context *ctx, pdf_page *page, fz_rect bbox, const char *uri);
+
+/*
+	delete an existing link from the specified page.
+*/
+void pdf_delete_link(fz_context *ctx, pdf_page *page, fz_link *link);
+
+enum pdf_border_style
+{
+	PDF_BORDER_STYLE_SOLID = 0,
+	PDF_BORDER_STYLE_DASHED,
+	PDF_BORDER_STYLE_BEVELED,
+	PDF_BORDER_STYLE_INSET,
+	PDF_BORDER_STYLE_UNDERLINE,
+};
+
+enum pdf_border_effect
+{
+	PDF_BORDER_EFFECT_NONE = 0,
+	PDF_BORDER_EFFECT_CLOUDY,
+};
 
 /*
 	create a new annotation of the specified type on the
@@ -340,6 +365,11 @@ void pdf_set_annot_popup(fz_context *ctx, pdf_annot *annot, fz_rect rect);
 fz_rect pdf_annot_popup(fz_context *ctx, pdf_annot *annot);
 
 /*
+	Check to see if an annotation has a rect.
+*/
+int pdf_annot_has_rect(fz_context *ctx, pdf_annot *annot);
+
+/*
 	Check to see if an annotation has an ink list.
 */
 int pdf_annot_has_ink_list(fz_context *ctx, pdf_annot *annot);
@@ -370,6 +400,16 @@ int pdf_annot_has_interior_color(fz_context *ctx, pdf_annot *annot);
 int pdf_annot_has_line_ending_styles(fz_context *ctx, pdf_annot *annot);
 
 /*
+	Check to see if an annotation has a border.
+*/
+int pdf_annot_has_border(fz_context *ctx, pdf_annot *annot);
+
+/*
+	Check to see if an annotation has a border effect.
+*/
+int pdf_annot_has_border_effect(fz_context *ctx, pdf_annot *annot);
+
+/*
 	Check to see if an annotation has an icon name.
 */
 int pdf_annot_has_icon_name(fz_context *ctx, pdf_annot *annot);
@@ -398,6 +438,36 @@ fz_rect pdf_annot_rect(fz_context *ctx, pdf_annot *annot);
 	Retrieve the annotation border line width in points.
 */
 float pdf_annot_border(fz_context *ctx, pdf_annot *annot);
+
+/*
+	Retrieve the annotation border style.
+ */
+enum pdf_border_style pdf_annot_border_style(fz_context *ctx, pdf_annot *annot);
+
+/*
+	Retrieve the annotation border width in points.
+ */
+float pdf_annot_border_width(fz_context *ctx, pdf_annot *annot);
+
+/*
+	How many items does the annotation border dash pattern have?
+ */
+int pdf_annot_border_dash_count(fz_context *ctx, pdf_annot *annot);
+
+/*
+	How long is dash item i in the annotation border dash pattern?
+ */
+float pdf_annot_border_dash_item(fz_context *ctx, pdf_annot *annot, int i);
+
+/*
+	Retrieve the annotation border effect.
+ */
+enum pdf_border_effect pdf_annot_border_effect(fz_context *ctx, pdf_annot *annot);
+
+/*
+	Retrieve the annotation border effect intensity.
+ */
+float pdf_annot_border_effect_intensity(fz_context *ctx, pdf_annot *annot);
 
 /*
 	Retrieve the annotation opacity. (0 transparent, 1 solid).
@@ -466,14 +536,51 @@ fz_point pdf_annot_ink_list_stroke_vertex(fz_context *ctx, pdf_annot *annot, int
 void pdf_set_annot_flags(fz_context *ctx, pdf_annot *annot, int flags);
 
 /*
+	Set the stamp appearance stream to a custom image.
+	Fits the image to the current Rect, and shrinks the Rect
+	to fit the image aspect ratio.
+*/
+void pdf_set_annot_stamp_image(fz_context *ctx, pdf_annot *annot, fz_image *image);
+
+/*
 	Set the bounding box for an annotation, in doc space.
 */
 void pdf_set_annot_rect(fz_context *ctx, pdf_annot *annot, fz_rect rect);
 
 /*
-	Set the border width for an annotation, in points.
+	Set the border width for an annotation, in points and remove any border effect.
 */
 void pdf_set_annot_border(fz_context *ctx, pdf_annot *annot, float width);
+
+/*
+	Set the border style for an annotation.
+*/
+void pdf_set_annot_border_style(fz_context *ctx, pdf_annot *annot, enum pdf_border_style style);
+
+/*
+	Set the border width for an annotation in points;
+*/
+void pdf_set_annot_border_width(fz_context *ctx, pdf_annot *annot, float width);
+
+/*
+	Clear the entire border dash pattern for an annotation.
+*/
+void pdf_clear_annot_border_dash(fz_context *ctx, pdf_annot *annot);
+
+/*
+	Add an item to the end of the border dash pattern for an annotation.
+*/
+void pdf_add_annot_border_dash_item(fz_context *ctx, pdf_annot *annot, float length);
+
+/*
+	Set the border effect for an annotation.
+*/
+void pdf_set_annot_border_effect(fz_context *ctx, pdf_annot *annot, enum pdf_border_effect effect);
+
+/*
+	Set the border effect intensity for an annotation.
+*/
+void pdf_set_annot_border_effect_intensity(fz_context *ctx, pdf_annot *annot, float intensity);
 
 /*
 	Set the opacity for an annotation, between 0 (transparent) and 1
@@ -573,6 +680,7 @@ void pdf_set_annot_line_ending_styles(fz_context *ctx, pdf_annot *annot, enum pd
 
 const char *pdf_annot_icon_name(fz_context *ctx, pdf_annot *annot);
 int pdf_annot_is_open(fz_context *ctx, pdf_annot *annot);
+int pdf_annot_is_standard_stamp(fz_context *ctx, pdf_annot *annot);
 
 void pdf_annot_line(fz_context *ctx, pdf_annot *annot, fz_point *a, fz_point *b);
 void pdf_set_annot_line(fz_context *ctx, pdf_annot *annot, fz_point a, fz_point b);
@@ -738,7 +846,7 @@ int pdf_verify_embedded_file_checksum(fz_context *ctx, pdf_obj *fs);
 char *pdf_parse_link_dest(fz_context *ctx, pdf_document *doc, pdf_obj *obj);
 char *pdf_parse_link_action(fz_context *ctx, pdf_document *doc, pdf_obj *obj, int pagenum);
 pdf_obj *pdf_lookup_dest(fz_context *ctx, pdf_document *doc, pdf_obj *needle);
-fz_link *pdf_load_link_annots(fz_context *ctx, pdf_document *, pdf_obj *annots, int pagenum, fz_matrix page_ctm);
+fz_link *pdf_load_link_annots(fz_context *ctx, pdf_document *, pdf_page *, pdf_obj *annots, int pagenum, fz_matrix page_ctm);
 
 void pdf_annot_MK_BG(fz_context *ctx, pdf_annot *annot, int *n, float color[4]);
 void pdf_annot_MK_BC(fz_context *ctx, pdf_annot *annot, int *n, float color[4]);
@@ -769,5 +877,13 @@ pdf_obj *pdf_annot_filespec(fz_context *ctx, pdf_annot *annot);
 	Set the annotation file specification.
 */
 void pdf_set_annot_filespec(fz_context *ctx, pdf_annot *annot, pdf_obj *obj);
+
+/*
+	Get/set a hidden flag preventing the annotation from being
+	rendered when it is being edited. This flag is independent
+	of the hidden flag in the PDF annotation object described in the PDF specification.
+*/
+int pdf_annot_hidden_for_editing(fz_context *ctx, pdf_annot *annot);
+void pdf_set_annot_hidden_for_editing(fz_context *ctx, pdf_annot *annot, int hidden);
 
 #endif
