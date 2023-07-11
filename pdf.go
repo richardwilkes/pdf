@@ -87,6 +87,7 @@ var (
 	ErrInvalidPageNumber        = errors.New("invalid page number")
 	ErrUnableToLoadPage         = errors.New("unable to load page")
 	ErrUnableToCreateImage      = errors.New("unable to create image")
+	ErrInvalidPageSize          = errors.New("invalid page size")
 )
 
 // AuthenticationStatus holds the result of an authentication attempt. A non-zero value indicates success and the masks
@@ -254,6 +255,47 @@ func (d *Document) RenderPage(pageNumber, dpi, maxHits int, search string) (*Ren
 	displayList := C.wrapped_fz_new_display_list_from_page(d.ctx, page)
 	defer C.fz_drop_display_list(d.ctx, displayList)
 	scale := dpiToScale(dpi)
+	img := d.renderPage(displayList, scale)
+	if img == nil {
+		return nil, ErrUnableToCreateImage
+	}
+	return &RenderedPage{
+		Image:      img,
+		SearchHits: d.searchDisplayList(displayList, scale, search, maxHits),
+		Links:      d.loadLinks(page, scale),
+	}, nil
+}
+
+// RenderPageForSize renders the specified page to fit within the requested size. If search is not empty, then the
+// bounding boxes of up to maxHits matching text on the page will be returned.
+func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits int, search string) (*RenderedPage, error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	pageCount := int(C.fz_count_pages(d.ctx, d.doc))
+	if pageNumber >= pageCount {
+		return nil, ErrInvalidPageNumber
+	}
+	page := C.fz_load_page(d.ctx, d.doc, C.int(pageNumber))
+	if page == nil {
+		return nil, ErrUnableToLoadPage
+	}
+	defer C.fz_drop_page(d.ctx, page)
+	displayList := C.wrapped_fz_new_display_list_from_page(d.ctx, page)
+	defer C.fz_drop_display_list(d.ctx, displayList)
+	r := C.fz_bound_page(d.ctx, page)
+	w := float64(r.x1 - r.x0)
+	h := float64(r.y1 - r.y0)
+	if w <= 0 || h <= 0 {
+		return nil, ErrInvalidPageSize
+	}
+	scale := float64(maxWidth) / w
+	ratio := float64(maxHeight) / h
+	if scale > ratio {
+		scale = ratio
+	}
+	if scale <= 0 {
+		return nil, ErrInvalidPageSize
+	}
 	img := d.renderPage(displayList, scale)
 	if img == nil {
 		return nil, ErrUnableToCreateImage
