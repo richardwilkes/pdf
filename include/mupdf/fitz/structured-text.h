@@ -17,8 +17,8 @@
 //
 // Alternative licensing terms are available from the licensor.
 // For commercial licensing, see <https://www.artifex.com/> or contact
-// Artifex Software, Inc., 1305 Grant Avenue - Suite 200, Novato,
-// CA 94945, U.S.A., +1(415)492-9861, for further information.
+// Artifex Software, Inc., 39 Mesa Street, Suite 108A, San Francisco,
+// CA 94129, USA, for further information.
 
 #ifndef MUPDF_FITZ_STRUCTURED_TEXT_H
 #define MUPDF_FITZ_STRUCTURED_TEXT_H
@@ -133,6 +133,7 @@ enum
 	FZ_STEXT_DEHYPHENATE = 16,
 	FZ_STEXT_PRESERVE_SPANS = 32,
 	FZ_STEXT_MEDIABOX_CLIP = 64,
+	FZ_STEXT_USE_CID_FOR_UNKNOWN_UNICODE = 128,
 };
 
 /**
@@ -185,7 +186,7 @@ struct fz_stext_line
 */
 struct fz_stext_char
 {
-	int c;
+	int c; /* unicode character value */
 	int color; /* sRGB hex color */
 	fz_point origin;
 	fz_quad quad;

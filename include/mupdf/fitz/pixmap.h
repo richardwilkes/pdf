@@ -17,8 +17,8 @@
 //
 // Alternative licensing terms are available from the licensor.
 // For commercial licensing, see <https://www.artifex.com/> or contact
-// Artifex Software, Inc., 1305 Grant Avenue - Suite 200, Novato,
-// CA 94945, U.S.A., +1(415)492-9861, for further information.
+// Artifex Software, Inc., 39 Mesa Street, Suite 108A, San Francisco,
+// CA 94129, USA, for further information.
 
 #ifndef MUPDF_FITZ_PIXMAP_H
 #define MUPDF_FITZ_PIXMAP_H
@@ -64,6 +64,11 @@ int fz_pixmap_x(fz_context *ctx, const fz_pixmap *pix);
 	Return the y value of the pixmap in pixels.
 */
 int fz_pixmap_y(fz_context *ctx, const fz_pixmap *pix);
+
+/**
+	Return sizeof fz_pixmap plus size of data, in bytes.
+*/
+size_t fz_pixmap_size(fz_context *ctx, fz_pixmap *pix);
 
 /**
 	Create a new pixmap, with its origin at (0,0)
@@ -470,5 +475,27 @@ fz_pixmap *fz_new_pixmap_from_alpha_channel(fz_context *ctx, fz_pixmap *src);
  * Combine a pixmap without an alpha channel with a soft mask.
  */
 fz_pixmap *fz_new_pixmap_from_color_and_mask(fz_context *ctx, fz_pixmap *color, fz_pixmap *mask);
+
+/*
+ * Scale the pixmap up or down in size to fit the rectangle. Will return `NULL`
+ * if the scaling factors are out of range. This applies fancy filtering and
+ * will anti-alias the edges for subpixel positioning if using non-integer
+ * coordinates. If the clip rectangle is set, the returned pixmap may be subset
+ * to fit the clip rectangle. Pass `NULL` to the clip if you want the whole
+ * pixmap scaled.
+ */
+fz_pixmap *fz_scale_pixmap(fz_context *ctx, fz_pixmap *src, float x, float y, float w, float h, const fz_irect *clip);
+
+/*
+ * Reduces size to:
+ * tile->w => (tile->w + 2^factor-1) / 2^factor
+ * tile->h => (tile->h + 2^factor-1) / 2^factor
+ */
+void fz_subsample_pixmap(fz_context *ctx, fz_pixmap *tile, int factor);
+
+/*
+ * Copies r (clipped to both src and dest) in src to dest.
+ */
+void fz_copy_pixmap_rect(fz_context *ctx, fz_pixmap *dest, fz_pixmap *src, fz_irect r, const fz_default_colorspaces *default_cs);
 
 #endif
