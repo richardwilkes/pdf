@@ -112,17 +112,17 @@ type Document struct {
 // TOCEntry holds a single entry in the table of contents.
 type TOCEntry struct {
 	Title      string
+	Children   []*TOCEntry
 	PageNumber int
 	PageX      int
 	PageY      int
-	Children   []*TOCEntry
 }
 
 // PageLink holds a single link on a page. If PageNumber if >= 0, then this is an internal link and the URI will be
 // empty.
 type PageLink struct {
-	PageNumber int
 	URI        string
+	PageNumber int
 	Bounds     image.Rectangle
 }
 
