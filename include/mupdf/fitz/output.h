@@ -54,7 +54,7 @@ typedef void (fz_output_write_fn)(fz_context *ctx, void *state, const void *data
 
 	state: The output stream state to seek within.
 
-	offset, whence: as defined for fs_seek_output.
+	offset, whence: as defined for fz_seek().
 */
 typedef void (fz_output_seek_fn)(fz_context *ctx, void *state, int64_t offset, int whence);
 
@@ -75,6 +75,14 @@ typedef int64_t (fz_output_tell_fn)(fz_context *ctx, void *state);
 	when the output stream is closed, to flush any pending writes.
 */
 typedef void (fz_output_close_fn)(fz_context *ctx, void *state);
+
+/**
+	A function type for use when implementing
+	fz_outputs. The supplied function of this type is called
+	when the output stream is reset, and resets the state
+	to that when it was first initialised.
+*/
+typedef void (fz_output_reset_fn)(fz_context *ctx, void *state);
 
 /**
 	A function type for use when implementing
@@ -107,8 +115,10 @@ struct fz_output
 	fz_output_tell_fn *tell;
 	fz_output_close_fn *close;
 	fz_output_drop_fn *drop;
+	fz_output_reset_fn *reset;
 	fz_stream_from_output_fn *as_stream;
 	fz_truncate_fn *truncate;
+	int closed;
 	char *bp, *wp, *ep;
 	/* If buffered is non-zero, then we have that many
 	 * bits (1-7) waiting to be written in bits. */
@@ -223,6 +233,14 @@ void fz_flush_output(fz_context *ctx, fz_output *out);
 void fz_close_output(fz_context *, fz_output *);
 
 /**
+	Reset a closed output stream. Returns state to
+	(broadly) that which it was in when opened. Not
+	all outputs can be reset, so this may throw an
+	exception.
+*/
+void fz_reset_output(fz_context *, fz_output *);
+
+/**
 	Free an output stream. Don't forget to close it first!
 */
 void fz_drop_output(fz_context *, fz_output *);
@@ -310,7 +328,7 @@ void fz_write_bits_sync(fz_context *ctx, fz_output *out);
 
 /**
 	Our customised 'printf'-like string formatter.
-	Takes %c, %d, %s, %u, %x, as usual.
+	Takes %c, %d, %s, %u, %x, %X as usual.
 	Modifiers are not supported except for zero-padding ints (e.g.
 	%02d, %03u, %04x, etc).
 	%g output in "as short as possible hopefully lossless
@@ -322,8 +340,8 @@ void fz_write_bits_sync(fz_context *ctx, fz_output *out);
 	%P outputs a fz_point*.
 	%n outputs a PDF name (with appropriate escaping).
 	%q and %( output escaped strings in C/PDF syntax.
-	%l{d,u,x} indicates that the values are int64_t.
-	%z{d,u,x} indicates that the value is a size_t.
+	%l{d,u,x,X} indicates that the values are int64_t.
+	%z{d,u,x,X} indicates that the value is a size_t.
 
 	user: An opaque pointer that is passed to the emit function.
 
