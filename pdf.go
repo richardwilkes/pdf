@@ -62,6 +62,18 @@ int wrapped_fz_search_display_list(fz_context *ctx, fz_display_list *list, const
 	}
 	return hits;
 }
+
+fz_outline *wrapped_fz_load_outline(fz_context *ctx, fz_document *doc) {
+	fz_outline *outline = NULL;
+	fz_var(outline);
+	fz_try(ctx) {
+		outline = fz_load_outline(ctx, doc);
+	}
+	fz_catch(ctx) {
+		outline = NULL;
+	}
+	return outline;
+}
 */
 import "C"
 
@@ -184,7 +196,7 @@ func (d *Document) Authenticate(password string) AuthenticationStatus {
 func (d *Document) TableOfContents(dpi int) []*TOCEntry {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	outline := C.fz_load_outline(d.ctx, d.doc)
+	outline := C.wrapped_fz_load_outline(d.ctx, d.doc)
 	if outline == nil {
 		return nil
 	}
