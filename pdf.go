@@ -2,8 +2,8 @@ package pdf
 
 /*
 #cgo CFLAGS: -Iinclude
-#cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/lib -lmupdf_darwin_amd64 -lm -ld_classic
-#cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/lib -lmupdf_darwin_arm64 -lm -ld_classic
+#cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/lib -lmupdf_darwin_amd64 -lm
+#cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/lib -lmupdf_darwin_arm64 -lm
 #cgo linux LDFLAGS: -L${SRCDIR}/lib -lmupdf_linux_amd64 -lm
 #cgo windows LDFLAGS: -L${SRCDIR}/lib -lmupdf_windows_amd64 -lm -Wl,--allow-multiple-definition
 
