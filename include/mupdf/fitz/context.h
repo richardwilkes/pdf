@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2022 Artifex Software, Inc.
+// Copyright (C) 2004-2024 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -590,6 +590,12 @@ const char *fz_user_css(fz_context *ctx);
 void fz_set_user_css(fz_context *ctx, const char *text);
 
 /**
+	Set the user stylesheet by loading the source from a file.
+	If the file is missing, do nothing.
+*/
+void fz_load_user_css(fz_context *ctx, const char *filename);
+
+/**
 	Return whether to respect document styles in HTML and EPUB.
 */
 int fz_use_document_css(fz_context *ctx);
@@ -713,6 +719,17 @@ void *fz_calloc_no_throw(fz_context *ctx, size_t count, size_t size);
 	exceptions.
 */
 void *fz_realloc_no_throw(fz_context *ctx, void *p, size_t size);
+
+/**
+	fz_malloc equivalent, except that the block is guaranteed aligned.
+	Block must be freed later using fz_free_aligned.
+*/
+void *fz_malloc_aligned(fz_context *ctx, size_t size, int align);
+
+/**
+	fz_free equivalent, for blocks allocated via fz_malloc_aligned.
+*/
+void fz_free_aligned(fz_context *ctx, void *p);
 
 /**
 	Portable strdup implementation, using fz allocators.

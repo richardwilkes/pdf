@@ -10,10 +10,15 @@ package pdf
 #include <stdlib.h>
 #include <mupdf/fitz.h>
 
-const char *version = FZ_VERSION;
-const char *pdfMimeType = "application/pdf";
+// Wrappers for cases where "exceptions" can be thrown or where a macro is used
 
-// Wrappers for cases where "exceptions" can be thrown
+fz_context *wrapped_fz_new_context(const fz_alloc_context *alloc, const fz_locks_context *locks, size_t max_store) {
+	return fz_new_context(alloc, locks, max_store);
+}
+
+fz_document *wrapped_fz_open_pdf_document_with_stream(fz_context *ctx, fz_stream *stream) {
+	return fz_open_document_with_stream(ctx, "application/pdf", stream);
+}
 
 fz_stream *wrapped_fz_open_memory(fz_context *ctx, const unsigned char *data, size_t len) {
 	fz_stream *stream = NULL;
@@ -158,7 +163,7 @@ func New(buffer []byte, maxCacheSize uint64) (*Document, error) {
 		return nil, ErrNotPDFData
 	}
 	var d Document
-	d.ctx = C.fz_new_context_imp(nil, nil, C.size_t(maxCacheSize), C.version)
+	d.ctx = C.wrapped_fz_new_context(nil, nil, C.size_t(maxCacheSize))
 	if d.ctx == nil {
 		return nil, ErrUnableToCreatePDFContext
 	}
@@ -173,7 +178,7 @@ func New(buffer []byte, maxCacheSize uint64) (*Document, error) {
 		d.Release()
 		return nil, ErrInternal
 	}
-	d.doc = C.fz_open_document_with_stream(d.ctx, C.pdfMimeType, stream)
+	d.doc = C.wrapped_fz_open_pdf_document_with_stream(d.ctx, stream)
 	C.fz_drop_stream(d.ctx, stream)
 	if d.doc == nil {
 		d.Release()
