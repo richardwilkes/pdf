@@ -113,12 +113,19 @@ const (
 	OwnerAuthenticatedMask
 )
 
-// Document represents PDF document.
-type Document struct {
+type document struct {
 	ctx  *C.fz_context
 	doc  *C.fz_document
 	data *C.uchar
 	lock sync.Mutex
+}
+
+// Document represents PDF document.
+//
+//nolint:govet // Yes, I know this makes the struct larger than it needs to be
+type Document struct {
+	_ int // This here just to make &Document a different pointer value than &document for runtime.AddCleanup()
+	document
 }
 
 // TOCEntry holds a single entry in the table of contents.
@@ -172,7 +179,7 @@ func New(buffer []byte, maxCacheSize uint64) (*Document, error) {
 		d.Release()
 		return nil, ErrUnableToOpenPDF
 	}
-	runtime.SetFinalizer(&d, func(obj *Document) { obj.Release() })
+	runtime.AddCleanup(&d, func(doc *document) { doc.release() }, &d.document)
 	return &d, nil
 }
 
@@ -402,6 +409,10 @@ func (d *Document) loadLinks(page *C.fz_page, scale float64) []*PageLink {
 // Release the underlying PDF document, releasing any resources. It is not necessary to call this, as garbage collection
 // will eventually do this for you, however, doing so explicitly will cause an immediate reclamation of any used memory.
 func (d *Document) Release() {
+	d.release()
+}
+
+func (d *document) release() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.doc != nil {
