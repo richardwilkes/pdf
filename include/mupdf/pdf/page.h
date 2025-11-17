@@ -164,7 +164,7 @@ fz_separations *pdf_page_separations(fz_context *ctx, pdf_page *page);
 
 pdf_ocg_descriptor *pdf_read_ocg(fz_context *ctx, pdf_document *doc);
 void pdf_drop_ocg(fz_context *ctx, pdf_document *doc);
-int pdf_is_ocg_hidden(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, const char *usage, pdf_obj *ocg);
+int pdf_is_ocg_hidden(fz_context *ctx, pdf_document *doc, pdf_resource_stack *rdb, const char *usage, pdf_obj *ocg);
 
 fz_link *pdf_load_links(fz_context *ctx, pdf_page *page);
 
@@ -289,6 +289,8 @@ int pdf_redact_page(fz_context *ctx, pdf_document *doc, pdf_page *page, pdf_reda
 fz_transition *pdf_page_presentation(fz_context *ctx, pdf_page *page, fz_transition *transition, float *duration);
 
 fz_default_colorspaces *pdf_load_default_colorspaces(fz_context *ctx, pdf_document *doc, pdf_page *page);
+
+void pdf_clip_page(fz_context *ctx, pdf_page *page, fz_rect *clip);
 
 /*
 	Update default colorspaces for an xobject.

@@ -339,6 +339,8 @@ struct fz_image
 	unsigned int use_decode:1;
 	unsigned int decoded:1;
 	unsigned int scalable:1;
+	unsigned int intent:2;
+	unsigned int has_intent:1;
 	uint8_t orientation;
 	fz_image *mask;
 	int xres; /* As given in the image, not necessarily as rendered */
@@ -384,6 +386,12 @@ void fz_image_resolution(fz_image *image, int *xres, int *yres);
 	8: flip on X, then rotate ccw by 270 degrees. (Exif = 7)
 */
 uint8_t fz_image_orientation(fz_context *ctx, fz_image *image);
+
+/*
+	Return true if the image source is a lossy format such as JPEG,
+	JPEG2000, or JPEG-XR.
+*/
+int fz_is_lossy_image(fz_context *ctx, fz_image *image);
 
 fz_matrix
 fz_image_orientation_matrix(fz_context *ctx, fz_image *image);

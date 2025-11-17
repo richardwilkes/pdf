@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2024 Artifex Software, Inc.
+// Copyright (C) 2004-2025 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -28,6 +28,8 @@
 typedef struct pdf_document pdf_document;
 typedef struct pdf_crypt pdf_crypt;
 typedef struct pdf_journal pdf_journal;
+
+typedef struct pdf_resource_stack pdf_resource_stack;
 
 /* Defined in PDF 1.7 according to Acrobat limit. */
 #define PDF_MAX_OBJECT_NUMBER 8388607
@@ -110,7 +112,7 @@ int pdf_cycle(fz_context *ctx, pdf_cycle_list *here, pdf_cycle_list *prev, pdf_o
 typedef struct
 {
 	int len;
-	unsigned char bits[1];
+	unsigned char bits[FZ_FLEXIBLE_ARRAY];
 } pdf_mark_bits;
 
 pdf_mark_bits *pdf_new_mark_bits(fz_context *ctx, pdf_document *doc);
@@ -437,5 +439,7 @@ void pdf_add_journal_fragment(fz_context *ctx, pdf_document *doc, int parent, pd
 
 char *pdf_format_date(fz_context *ctx, int64_t time, char *s, size_t n);
 int64_t pdf_parse_date(fz_context *ctx, const char *s);
+
+int pdf_is_image_stream(fz_context *ctx, pdf_obj *obj);
 
 #endif
