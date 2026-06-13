@@ -79,6 +79,96 @@ fz_outline *wrapped_fz_load_outline(fz_context *ctx, fz_document *doc) {
 	}
 	return outline;
 }
+
+// Returns 1 on success, 0 if registration threw.
+int wrapped_fz_register_document_handlers(fz_context *ctx) {
+	int ok = 0;
+	fz_var(ok);
+	fz_try(ctx) {
+		fz_register_document_handlers(ctx);
+		ok = 1;
+	}
+	fz_catch(ctx) {
+		ok = 0;
+	}
+	return ok;
+}
+
+// Returns the result of fz_needs_password, or 0 if it threw.
+int wrapped_fz_needs_password(fz_context *ctx, fz_document *doc) {
+	int needs = 0;
+	fz_var(needs);
+	fz_try(ctx) {
+		needs = fz_needs_password(ctx, doc);
+	}
+	fz_catch(ctx) {
+		needs = 0;
+	}
+	return needs;
+}
+
+// Returns the result of fz_authenticate_password, or 0 (failure) if it threw.
+int wrapped_fz_authenticate_password(fz_context *ctx, fz_document *doc, const char *password) {
+	int result = 0;
+	fz_var(result);
+	fz_try(ctx) {
+		result = fz_authenticate_password(ctx, doc, password);
+	}
+	fz_catch(ctx) {
+		result = 0;
+	}
+	return result;
+}
+
+// Returns the page count, or -1 if it threw.
+int wrapped_fz_count_pages(fz_context *ctx, fz_document *doc) {
+	int count = -1;
+	fz_var(count);
+	fz_try(ctx) {
+		count = fz_count_pages(ctx, doc);
+	}
+	fz_catch(ctx) {
+		count = -1;
+	}
+	return count;
+}
+
+fz_page *wrapped_fz_load_page(fz_context *ctx, fz_document *doc, int number) {
+	fz_page *page = NULL;
+	fz_var(page);
+	fz_try(ctx) {
+		page = fz_load_page(ctx, doc, number);
+	}
+	fz_catch(ctx) {
+		page = NULL;
+	}
+	return page;
+}
+
+// Returns the page bounds, or a zero rect if it threw.
+fz_rect wrapped_fz_bound_page(fz_context *ctx, fz_page *page) {
+	fz_rect rect = fz_empty_rect;
+	fz_var(rect);
+	fz_try(ctx) {
+		rect = fz_bound_page(ctx, page);
+	}
+	fz_catch(ctx) {
+		rect = fz_empty_rect;
+	}
+	return rect;
+}
+
+fz_link *wrapped_fz_load_links(fz_context *ctx, fz_page *page) {
+	fz_link *links = NULL;
+	fz_var(links);
+	fz_try(ctx) {
+		links = fz_load_links(ctx, page);
+	}
+	fz_catch(ctx) {
+		links = NULL;
+	}
+	return links;
+}
 */
 import "C"
 
@@ -126,11 +216,11 @@ type document struct {
 }
 
 // Document represents PDF document.
-//
-//nolint:govet // Yes, I know this makes the struct larger than it needs to be
 type Document struct {
-	_ int // This here just to make &Document a different pointer value than &document for runtime.AddCleanup()
-	document
+	// document is held by pointer so it lives in its own heap allocation, separate from the Document wrapper. This is
+	// required by runtime.AddCleanup(): the cleanup arg must not point into the same allocation as the tracked pointer,
+	// otherwise the tracked object can never become unreachable and the cleanup would never run.
+	*document
 }
 
 // TOCEntry holds a single entry in the table of contents.
@@ -162,12 +252,18 @@ func New(buffer []byte, maxCacheSize uint64) (*Document, error) {
 	if !bytes.HasPrefix(buffer, []byte("%PDF")) {
 		return nil, ErrNotPDFData
 	}
-	var d Document
-	d.ctx = C.wrapped_fz_new_context(nil, nil, C.size_t(maxCacheSize))
+	d := Document{
+		document: &document{
+			ctx: C.wrapped_fz_new_context(nil, nil, C.size_t(maxCacheSize)),
+		},
+	}
 	if d.ctx == nil {
 		return nil, ErrUnableToCreatePDFContext
 	}
-	C.fz_register_document_handlers(d.ctx)
+	if C.wrapped_fz_register_document_handlers(d.ctx) == 0 {
+		d.Release()
+		return nil, ErrUnableToCreatePDFContext
+	}
 	d.data = (*C.uchar)(C.CBytes(buffer))
 	if d.data == nil {
 		d.Release()
@@ -184,7 +280,7 @@ func New(buffer []byte, maxCacheSize uint64) (*Document, error) {
 		d.Release()
 		return nil, ErrUnableToOpenPDF
 	}
-	runtime.AddCleanup(&d, func(doc *document) { doc.release() }, &d.document)
+	runtime.AddCleanup(&d, func(doc *document) { doc.release() }, d.document)
 	return &d, nil
 }
 
@@ -192,7 +288,7 @@ func New(buffer []byte, maxCacheSize uint64) (*Document, error) {
 func (d *Document) RequiresAuthentication() bool {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	return C.fz_needs_password(d.ctx, d.doc) != 0
+	return C.wrapped_fz_needs_password(d.ctx, d.doc) != 0
 }
 
 // Authenticate with either the user or owner password.
@@ -201,7 +297,7 @@ func (d *Document) Authenticate(password string) AuthenticationStatus {
 	defer d.lock.Unlock()
 	pw := C.CString(password)
 	defer C.free(unsafe.Pointer(pw))
-	return AuthenticationStatus(C.fz_authenticate_password(d.ctx, d.doc, pw))
+	return AuthenticationStatus(C.wrapped_fz_authenticate_password(d.ctx, d.doc, pw))
 }
 
 // TableOfContents returns the table of contents for this document, if any.
@@ -251,7 +347,10 @@ func sanitizeString(in *C.char) string {
 func (d *Document) PageCount() int {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	return int(C.fz_count_pages(d.ctx, d.doc))
+	if count := int(C.wrapped_fz_count_pages(d.ctx, d.doc)); count > 0 {
+		return count
+	}
+	return 0
 }
 
 func dpiToScale(dpi int) float64 {
@@ -267,11 +366,11 @@ func dpiToScale(dpi int) float64 {
 func (d *Document) RenderPage(pageNumber, dpi, maxHits int, search string) (*RenderedPage, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	pageCount := int(C.fz_count_pages(d.ctx, d.doc))
-	if pageNumber >= pageCount {
+	pageCount := int(C.wrapped_fz_count_pages(d.ctx, d.doc))
+	if pageNumber < 0 || pageNumber >= pageCount {
 		return nil, ErrInvalidPageNumber
 	}
-	page := C.fz_load_page(d.ctx, d.doc, C.int(pageNumber))
+	page := C.wrapped_fz_load_page(d.ctx, d.doc, C.int(pageNumber))
 	if page == nil {
 		return nil, ErrUnableToLoadPage
 	}
@@ -295,18 +394,18 @@ func (d *Document) RenderPage(pageNumber, dpi, maxHits int, search string) (*Ren
 func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits int, search string) (*RenderedPage, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	pageCount := int(C.fz_count_pages(d.ctx, d.doc))
-	if pageNumber >= pageCount {
+	pageCount := int(C.wrapped_fz_count_pages(d.ctx, d.doc))
+	if pageNumber < 0 || pageNumber >= pageCount {
 		return nil, ErrInvalidPageNumber
 	}
-	page := C.fz_load_page(d.ctx, d.doc, C.int(pageNumber))
+	page := C.wrapped_fz_load_page(d.ctx, d.doc, C.int(pageNumber))
 	if page == nil {
 		return nil, ErrUnableToLoadPage
 	}
 	defer C.fz_drop_page(d.ctx, page)
 	displayList := C.wrapped_fz_new_display_list_from_page(d.ctx, page)
 	defer C.fz_drop_display_list(d.ctx, displayList)
-	r := C.fz_bound_page(d.ctx, page)
+	r := C.wrapped_fz_bound_page(d.ctx, page)
 	w := float64(r.x1 - r.x0)
 	h := float64(r.y1 - r.y0)
 	if w <= 0 || h <= 0 {
@@ -356,7 +455,7 @@ func (d *Document) renderPage(displayList *C.fz_display_list, scale float64) *im
 
 func (d *Document) searchDisplayList(displayList *C.fz_display_list, scale float64, search string, maxHits int) []image.Rectangle {
 	var boxes []image.Rectangle
-	if search != "" {
+	if search != "" && maxHits > 0 {
 		searchText := C.CString(search)
 		defer C.free(unsafe.Pointer(searchText))
 		quads := make([]C.fz_quad, maxHits)
@@ -377,7 +476,7 @@ func (d *Document) searchDisplayList(displayList *C.fz_display_list, scale float
 
 func (d *Document) loadLinks(page *C.fz_page, scale float64) []*PageLink {
 	var links []*PageLink
-	if link := C.fz_load_links(d.ctx, page); link != nil {
+	if link := C.wrapped_fz_load_links(d.ctx, page); link != nil {
 		firstLink := link
 		for link != nil {
 			pageLink := &PageLink{

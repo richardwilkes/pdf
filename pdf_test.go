@@ -1,6 +1,7 @@
 package pdf_test
 
 import (
+	"errors"
 	"image"
 	"os"
 	"strings"
@@ -98,6 +99,23 @@ func TestPDF(t *testing.T) {
 	expectedBounds := image.Rect(0, 0, 827, 1170)
 	if page.Image.Rect != expectedBounds {
 		t.Errorf("expected an image bounds of %v, got %v", expectedBounds, page.Image.Rect)
+	}
+
+	// A negative page number must be rejected rather than crashing in MuPDF
+	if _, err = doc.RenderPage(-1, 100, 20, ""); !errors.Is(err, pdf.ErrInvalidPageNumber) {
+		t.Errorf("expected ErrInvalidPageNumber for a negative page, got %v", err)
+	}
+	if _, err = doc.RenderPageForSize(-1, 800, 800, 20, ""); !errors.Is(err, pdf.ErrInvalidPageNumber) {
+		t.Errorf("expected ErrInvalidPageNumber for a negative page, got %v", err)
+	}
+
+	// A search with maxHits <= 0 must not panic and must yield no hits
+	page, err = doc.RenderPage(0, 100, 0, "GURPS")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.SearchHits) != 0 {
+		t.Errorf("expected 0 search hits with maxHits of 0, got %d", len(page.SearchHits))
 	}
 }
 
