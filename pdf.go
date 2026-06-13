@@ -446,11 +446,33 @@ func (d *Document) renderPage(displayList *C.fz_display_list, scale float64) *im
 	if size <= 0 || size > math.MaxInt32 {
 		return nil
 	}
+	pix := C.GoBytes(unsafe.Pointer(pixels), C.int(size))
+	// MuPDF renders with premultiplied alpha, but image.NRGBA expects non-premultiplied (straight) alpha, so undo the
+	// premultiplication. Fully opaque (a == 255) and fully transparent (a == 0) pixels need no adjustment.
+	for i := 0; i+3 < len(pix); i += 4 {
+		switch a := pix[i+3]; a {
+		case 0, 255:
+		default:
+			pix[i] = unpremultiply(pix[i], a)
+			pix[i+1] = unpremultiply(pix[i+1], a)
+			pix[i+2] = unpremultiply(pix[i+2], a)
+		}
+	}
 	return &image.NRGBA{
-		Pix:    C.GoBytes(unsafe.Pointer(pixels), C.int(size)),
+		Pix:    pix,
 		Stride: int(pixmap.stride),
 		Rect:   image.Rect(0, 0, int(pixmap.w), int(pixmap.h)),
 	}
+}
+
+// unpremultiply converts a single premultiplied color component back to its straight-alpha value, rounding to nearest and
+// clamping to 0xff. The caller guarantees a is neither 0 nor 0xff.
+func unpremultiply(c, a uint8) uint8 {
+	v := (int(c)*0xff + int(a)/2) / int(a)
+	if v > 0xff {
+		return 0xff
+	}
+	return uint8(v)
 }
 
 func (d *Document) searchDisplayList(displayList *C.fz_display_list, scale float64, search string, maxHits int) []image.Rectangle {
