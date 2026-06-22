@@ -4,8 +4,10 @@ package pdf
 #cgo CFLAGS: -Iinclude
 #cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/lib -lmupdf_darwin_amd64 -lm
 #cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/lib -lmupdf_darwin_arm64 -lm
-#cgo linux LDFLAGS: -L${SRCDIR}/lib -lmupdf_linux_amd64 -lm
-#cgo windows LDFLAGS: -L${SRCDIR}/lib -lmupdf_windows_amd64 -lm -Wl,--allow-multiple-definition
+#cgo linux,amd64 LDFLAGS: -L${SRCDIR}/lib -lmupdf_linux_amd64 -lm
+#cgo linux,arm64 LDFLAGS: -L${SRCDIR}/lib -lmupdf_linux_arm64 -lm
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/lib -lmupdf_windows_amd64 -lm -Wl,--allow-multiple-definition
+#cgo windows,arm64 LDFLAGS: -L${SRCDIR}/lib -lmupdf_windows_arm64 -lm -Wl,--allow-multiple-definition
 
 #include <stdlib.h>
 #include <mupdf/fitz.h>
