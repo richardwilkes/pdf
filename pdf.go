@@ -204,6 +204,7 @@ var (
 	ErrInvalidPageNumber        = errors.New("invalid page number")
 	ErrUnableToLoadPage         = errors.New("unable to load page")
 	ErrUnableToCreateImage      = errors.New("unable to create image")
+	ErrImageTooLarge            = errors.New("rendered image would be too large")
 	ErrInvalidPageSize          = errors.New("invalid page size")
 	ErrDocumentReleased         = errors.New("document has been released")
 )
@@ -218,6 +219,12 @@ var (
 	// OverallMaxTOCEntries is the maximum number of TOC entries returned. This is here to safeguard against untrusted
 	// input that might otherwise cause an out of memory error.
 	OverallMaxTOCEntries = 1000
+	// OverallMaxPixels is the maximum number of pixels (width × height) a rendered page image may contain. Requests
+	// that would produce a larger image are rejected rather than attempting a very large allocation, safeguarding
+	// against untrusted input or bad sizing parameters that might otherwise cause an out of memory error. The default
+	// matches the largest image permitted by the internal 32-bit limit on the rendered buffer's byte size (4 bytes per
+	// pixel).
+	OverallMaxPixels = math.MaxInt32 / 4
 )
 
 // AuthenticationStatus holds the result of an authentication attempt. A non-zero value indicates success and the masks
@@ -430,9 +437,9 @@ func (d *Document) RenderPage(pageNumber, dpi, maxHits int, search string) (*Ren
 	displayList := C.wrapped_fz_new_display_list_from_page(d.ctx, page)
 	defer C.fz_drop_display_list(d.ctx, displayList)
 	scale := dpiToScale(dpi)
-	img := d.renderPage(displayList, scale)
-	if img == nil {
-		return nil, ErrUnableToCreateImage
+	img, err := d.renderPage(displayList, scale)
+	if err != nil {
+		return nil, err
 	}
 	return &RenderedPage{
 		Image:      img,
@@ -449,6 +456,9 @@ func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits in
 	if d.released() {
 		return nil, ErrDocumentReleased
 	}
+	if maxWidth <= 0 || maxHeight <= 0 {
+		return nil, ErrInvalidPageSize
+	}
 	pageCount := int(C.wrapped_fz_count_pages(d.ctx, d.doc))
 	if pageNumber < 0 || pageNumber >= pageCount {
 		return nil, ErrInvalidPageNumber
@@ -458,8 +468,6 @@ func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits in
 		return nil, ErrUnableToLoadPage
 	}
 	defer C.fz_drop_page(d.ctx, page)
-	displayList := C.wrapped_fz_new_display_list_from_page(d.ctx, page)
-	defer C.fz_drop_display_list(d.ctx, displayList)
 	r := C.wrapped_fz_bound_page(d.ctx, page)
 	w := float64(r.x1 - r.x0)
 	h := float64(r.y1 - r.y0)
@@ -467,16 +475,19 @@ func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits in
 		return nil, ErrInvalidPageSize
 	}
 	scale := float64(maxWidth) / w
-	ratio := float64(maxHeight) / h
-	if scale > ratio {
+	if ratio := float64(maxHeight) / h; ratio < scale {
 		scale = ratio
 	}
-	if scale <= 0 {
-		return nil, ErrInvalidPageSize
+	// The rendered image is scaled to fit within maxWidth×maxHeight, so its pixel count is bounded by the requested
+	// box. Reject an over-large request here, before building the display list or asking MuPDF to allocate the pixmap.
+	if (w*scale)*(h*scale) > float64(OverallMaxPixels) {
+		return nil, ErrImageTooLarge
 	}
-	img := d.renderPage(displayList, scale)
-	if img == nil {
-		return nil, ErrUnableToCreateImage
+	displayList := C.wrapped_fz_new_display_list_from_page(d.ctx, page)
+	defer C.fz_drop_display_list(d.ctx, displayList)
+	img, err := d.renderPage(displayList, scale)
+	if err != nil {
+		return nil, err
 	}
 	return &RenderedPage{
 		Image:      img,
@@ -485,21 +496,30 @@ func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits in
 	}, nil
 }
 
-func (d *Document) renderPage(displayList *C.fz_display_list, scale float64) *image.NRGBA {
+func (d *Document) renderPage(displayList *C.fz_display_list, scale float64) (*image.NRGBA, error) {
 	ctm := C.fz_scale(C.float(scale), C.float(scale))
 	cs := C.fz_device_rgb(d.ctx)
 	pixmap := C.wrapped_fz_new_pixmap_from_display_list(d.ctx, displayList, ctm, cs, 1)
 	if pixmap == nil {
-		return nil
+		return nil, ErrUnableToCreateImage
 	}
 	defer C.fz_drop_pixmap(d.ctx, pixmap)
+	if pixmap.w <= 0 || pixmap.h <= 0 {
+		return nil, ErrUnableToCreateImage
+	}
+	if int64(pixmap.w)*int64(pixmap.h) > int64(OverallMaxPixels) {
+		return nil, ErrImageTooLarge
+	}
 	pixels := C.fz_pixmap_samples(d.ctx, pixmap)
 	if pixels == nil {
-		return nil
+		return nil, ErrUnableToCreateImage
 	}
 	size := int(pixmap.stride) * int(pixmap.h)
-	if size <= 0 || size > math.MaxInt32 {
-		return nil
+	if size <= 0 {
+		return nil, ErrUnableToCreateImage
+	}
+	if size > math.MaxInt32 {
+		return nil, ErrImageTooLarge
 	}
 	pix := C.GoBytes(unsafe.Pointer(pixels), C.int(size))
 	// MuPDF renders with premultiplied alpha, but image.NRGBA expects non-premultiplied (straight) alpha, so undo the
@@ -517,7 +537,7 @@ func (d *Document) renderPage(displayList *C.fz_display_list, scale float64) *im
 		Pix:    pix,
 		Stride: int(pixmap.stride),
 		Rect:   image.Rect(0, 0, int(pixmap.w), int(pixmap.h)),
-	}
+	}, nil
 }
 
 // unpremultiply converts a single premultiplied color component back to its straight-alpha value, rounding to nearest

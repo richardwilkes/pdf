@@ -40,8 +40,9 @@ calls inside `fz_try`/`fz_catch` and return `NULL`/`0` on failure. **Any MuPDF c
 
 ### Document lifecycle and memory
 
-`New(buffer, maxCacheSize)` validates the `%PDF` prefix, creates an `fz_context`, registers the
-document handlers, copies the buffer into C memory (`C.CBytes`), and opens it as an in-memory
+`New(buffer, maxCacheSize)` scans the first 1KB for the `%PDF` marker (tolerating leading bytes
+before it, as Acrobat and MuPDF themselves do), creates an `fz_context`, registers the document
+handlers, copies the buffer into C memory (`C.CBytes`), and opens it as an in-memory
 stream. The `Document` type embeds a pointer to an unexported `document` that owns three C
 resources: `ctx`, `doc`, and `data`. These are freed in `release()` in that paired order (doc,
 data, ctx). After release, `ctx`/`doc` are nil; every public method first takes `d.lock` and
@@ -77,10 +78,22 @@ just two), so boxes stay correct for rotated or skewed text; min uses `math.Floo
 success, and the `NoAuthenticationRequiredMask` / `UserAuthenticatedMask` / `OwnerAuthenticatedMask`
 bit masks describe the detail.
 
-### Hit limits
+### Resource limits
 
-Search returns at most `maxHits` boxes, further capped by the package-level `OverallMaxHits`
-(default 1000) to guard against untrusted input forcing a huge allocation.
+Several package-level `OverallMax*` variables cap how much work untrusted input can force,
+guarding against out-of-memory errors:
+
+- `OverallMaxHits` (default 1000) — maximum search-hit boxes returned, regardless of the
+  `maxHits` argument passed to a render call.
+- `OverallMaxLinks` (default 1000) — maximum links returned for a page.
+- `OverallMaxTOCEntries` (default 1000) — maximum table-of-contents entries returned, counted
+  across the entire (possibly nested) outline tree.
+- `OverallMaxPixels` (default `math.MaxInt32 / 4`) — maximum pixels (width × height) in a
+  rendered image, matching the internal 32-bit ceiling on the rendered buffer's byte size.
+
+A render whose output would exceed `OverallMaxPixels` is rejected with `ErrImageTooLarge`.
+`RenderPageForSize` checks this up front—before building the display list or asking MuPDF to
+allocate the pixmap—and both render paths also enforce it centrally in `renderPage`.
 
 ### Conventions
 

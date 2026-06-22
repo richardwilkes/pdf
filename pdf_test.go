@@ -163,6 +163,48 @@ func TestUseAfterRelease(t *testing.T) {
 	}
 }
 
+func TestRenderPageForSizeLimits(t *testing.T) {
+	data, err := os.ReadFile("testfiles/GLAIVE_Mini_v2_3_for_GURPS_4e.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := pdf.New(data, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Release()
+
+	// A normal request renders successfully and fits within the requested box.
+	page, err := doc.RenderPageForSize(0, 800, 800, 0, "")
+	if err != nil {
+		t.Fatalf("unexpected error rendering for size: %v", err)
+	}
+	if page.Image == nil {
+		t.Fatal("expected image data, got nil")
+	}
+	if b := page.Image.Bounds(); b.Dx() <= 0 || b.Dy() <= 0 || b.Dx() > 800 || b.Dy() > 800 {
+		t.Errorf("rendered image %v does not fit within 800x800", b)
+	}
+
+	// A non-positive target size must be rejected up front with ErrInvalidPageSize.
+	for _, sz := range []struct{ w, h int }{{0, 800}, {800, 0}, {-1, 800}, {800, -1}} {
+		if _, err = doc.RenderPageForSize(0, sz.w, sz.h, 0, ""); !errors.Is(err, pdf.ErrInvalidPageSize) {
+			t.Errorf("expected ErrInvalidPageSize for target size %dx%d, got %v", sz.w, sz.h, err)
+		}
+	}
+
+	// A request whose output would exceed OverallMaxPixels must be rejected with ErrImageTooLarge rather than
+	// attempting a huge allocation. Both render paths enforce the same limit and report the same sentinel.
+	defer func(prev int) { pdf.OverallMaxPixels = prev }(pdf.OverallMaxPixels)
+	pdf.OverallMaxPixels = 100
+	if _, err = doc.RenderPageForSize(0, 800, 800, 0, ""); !errors.Is(err, pdf.ErrImageTooLarge) {
+		t.Errorf("expected ErrImageTooLarge from RenderPageForSize when exceeding OverallMaxPixels, got %v", err)
+	}
+	if _, err = doc.RenderPage(0, 100, 0, ""); !errors.Is(err, pdf.ErrImageTooLarge) {
+		t.Errorf("expected ErrImageTooLarge from RenderPage when exceeding OverallMaxPixels, got %v", err)
+	}
+}
+
 func checkTOCEntry(t *testing.T, toc []*pdf.TOCEntry, index int, prefix string, pageNumber, pageX, pageY int) {
 	t.Helper()
 	if !strings.HasPrefix(toc[index].Title, prefix) {
