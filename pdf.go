@@ -514,7 +514,7 @@ func unpremultiply(c, a uint8) uint8 {
 
 func (d *Document) searchDisplayList(displayList *C.fz_display_list, scale float64, search string, maxHits int) []image.Rectangle {
 	var boxes []image.Rectangle
-	if search != "" && maxHits > 0 {
+	if search != "" && maxHits > 0 && OverallMaxHits > 0 {
 		searchText := C.CString(search)
 		defer C.free(unsafe.Pointer(searchText))
 		quads := make([]C.fz_quad, min(maxHits, OverallMaxHits))
