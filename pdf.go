@@ -208,6 +208,10 @@ var (
 	ErrDocumentReleased         = errors.New("document has been released")
 )
 
+// OverallMaxHits is the maximum number of hits returned, even if the API is called with a larger value. This is here to
+// safeguard against untrusted input that might otherwise cause an out of memory error.
+var OverallMaxHits = 1000
+
 // AuthenticationStatus holds the result of an authentication attempt. A non-zero value indicates success and the masks
 // can be used to determine further details.
 type AuthenticationStatus byte
@@ -245,7 +249,7 @@ type TOCEntry struct {
 	PageY      int
 }
 
-// PageLink holds a single link on a page. If PageNumber if >= 0, then this is an internal link and the URI will be
+// PageLink holds a single link on a page. If PageNumber is >= 0, then this is an internal link and the URI will be
 // empty.
 type PageLink struct {
 	URI        string
@@ -513,7 +517,7 @@ func (d *Document) searchDisplayList(displayList *C.fz_display_list, scale float
 	if search != "" && maxHits > 0 {
 		searchText := C.CString(search)
 		defer C.free(unsafe.Pointer(searchText))
-		quads := make([]C.fz_quad, maxHits)
+		quads := make([]C.fz_quad, min(maxHits, OverallMaxHits))
 		hits := C.wrapped_fz_search_display_list(d.ctx, displayList, searchText, nil, (*C.fz_quad)(unsafe.Pointer(&quads[0])), C.int(len(quads)))
 		if hits > 0 {
 			boxes = make([]image.Rectangle, hits)
