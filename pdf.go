@@ -385,7 +385,7 @@ func (d *Document) PageCount() int {
 
 func dpiToScale(dpi int) float64 {
 	// Limit scaling to 10x; some displays report bad EDID data, causing the input DPI from programs to be wildly off.
-	return min(float64(dpi)/72, 10)
+	return min(float64(max(dpi, 1))/72, 10)
 }
 
 // RenderPage renders the specified page at the requested dpi. If search is not empty, then the bounding boxes of up to
@@ -518,15 +518,26 @@ func (d *Document) searchDisplayList(displayList *C.fz_display_list, scale float
 		if hits > 0 {
 			boxes = make([]image.Rectangle, hits)
 			for i := range boxes {
-				boxes[i] = image.Rect(int(math.Floor(math.Min(float64(quads[i].ul.x), float64(quads[i].ll.x))*scale)),
-					int(math.Floor(math.Min(float64(quads[i].ul.y), float64(quads[i].ur.y))*scale)),
-					int(math.Ceil(math.Max(float64(quads[i].ur.x), float64(quads[i].lr.x))*scale)),
-					int(math.Ceil(math.Max(float64(quads[i].ll.y), float64(quads[i].lr.y))*scale)),
-				)
+				boxes[i] = quadToRect(quads[i], scale)
 			}
 		}
 	}
 	return boxes
+}
+
+// quadToRect computes the scaled, axis-aligned bounding rectangle that encloses all four corners of a search-hit quad.
+// Considering every corner (rather than assuming an axis-aligned quad) keeps the box correct for rotated or skewed text.
+func quadToRect(q C.fz_quad, scale float64) image.Rectangle {
+	minX := math.Min(math.Min(float64(q.ul.x), float64(q.ur.x)), math.Min(float64(q.ll.x), float64(q.lr.x)))
+	minY := math.Min(math.Min(float64(q.ul.y), float64(q.ur.y)), math.Min(float64(q.ll.y), float64(q.lr.y)))
+	maxX := math.Max(math.Max(float64(q.ul.x), float64(q.ur.x)), math.Max(float64(q.ll.x), float64(q.lr.x)))
+	maxY := math.Max(math.Max(float64(q.ul.y), float64(q.ur.y)), math.Max(float64(q.ll.y), float64(q.lr.y)))
+	return image.Rect(
+		int(math.Floor(minX*scale)),
+		int(math.Floor(minY*scale)),
+		int(math.Ceil(maxX*scale)),
+		int(math.Ceil(maxY*scale)),
+	)
 }
 
 func (d *Document) loadLinks(page *C.fz_page, scale float64) []*PageLink {
