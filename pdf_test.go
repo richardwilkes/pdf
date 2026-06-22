@@ -119,6 +119,14 @@ func TestPDF(t *testing.T) {
 	}
 }
 
+func TestMalformedPDF(t *testing.T) {
+	// A buffer with a valid %PDF prefix but garbage contents passes the prefix check and then causes MuPDF to throw
+	// while opening the document. This must surface as ErrUnableToOpenPDF rather than crashing the process.
+	if _, err := pdf.New([]byte("%PDF-1.7\nnot a real pdf"), 0); !errors.Is(err, pdf.ErrUnableToOpenPDF) {
+		t.Fatalf("expected ErrUnableToOpenPDF for a malformed document, got %v", err)
+	}
+}
+
 func checkTOCEntry(t *testing.T, toc []*pdf.TOCEntry, index int, prefix string, pageNumber, pageX, pageY int) {
 	t.Helper()
 	if !strings.HasPrefix(toc[index].Title, prefix) {

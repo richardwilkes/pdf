@@ -19,7 +19,15 @@ fz_context *wrapped_fz_new_context(const fz_alloc_context *alloc, const fz_locks
 }
 
 fz_document *wrapped_fz_open_pdf_document_with_stream(fz_context *ctx, fz_stream *stream) {
-	return fz_open_document_with_stream(ctx, "application/pdf", stream);
+	fz_document *doc = NULL;
+	fz_var(doc);
+	fz_try(ctx) {
+		doc = fz_open_document_with_stream(ctx, "application/pdf", stream);
+	}
+	fz_catch(ctx) {
+		doc = NULL;
+	}
+	return doc;
 }
 
 fz_stream *wrapped_fz_open_memory(fz_context *ctx, const unsigned char *data, size_t len) {
@@ -217,7 +225,9 @@ type document struct {
 	lock sync.Mutex
 }
 
-// Document represents PDF document.
+// Document represents PDF document. Page numbers for the exposed API are zero-based. Methods on this are safe to use
+// from multiple goroutines. Calls into the underlying MuPDF library are serialized internally, so they execute one at a
+// time.
 type Document struct {
 	// document is held by pointer so it lives in its own heap allocation, separate from the Document wrapper. This is
 	// required by runtime.AddCleanup(): the cleanup arg must not point into the same allocation as the tracked pointer,
@@ -356,11 +366,8 @@ func (d *Document) PageCount() int {
 }
 
 func dpiToScale(dpi int) float64 {
-	scale := float64(dpi) / 72
-	if scale > 10 {
-		return 10 // Limit scaling to 10x; some displays report bad EDID data, causing the input DPI from programs to be wildly off
-	}
-	return scale
+	// Limit scaling to 10x; some displays report bad EDID data, causing the input DPI from programs to be wildly off.
+	return min(float64(dpi)/72, 10)
 }
 
 // RenderPage renders the specified page at the requested dpi. If search is not empty, then the bounding boxes of up to
@@ -467,8 +474,8 @@ func (d *Document) renderPage(displayList *C.fz_display_list, scale float64) *im
 	}
 }
 
-// unpremultiply converts a single premultiplied color component back to its straight-alpha value, rounding to nearest and
-// clamping to 0xff. The caller guarantees a is neither 0 nor 0xff.
+// unpremultiply converts a single premultiplied color component back to its straight-alpha value, rounding to nearest
+// and clamping to 0xff. The caller guarantees a is neither 0 nor 0xff.
 func unpremultiply(c, a uint8) uint8 {
 	v := (int(c)*0xff + int(a)/2) / int(a)
 	if v > 0xff {
@@ -519,8 +526,9 @@ func (d *Document) loadLinks(page *C.fz_page, scale float64) []*PageLink {
 					if i = strings.Index(pageLink.URI, "&"); i != -1 {
 						pageLink.URI = pageLink.URI[:i]
 					}
-					pageLink.PageNumber, _ = strconv.Atoi(pageLink.URI) //nolint:errcheck // Failure here results in 0, which is acceptable
-					pageLink.PageNumber--                               // Page numbers in links seem to be 1-based, but we use 0-based internally
+					//nolint:errcheck // Failure here results in 0, which is acceptable
+					pageLink.PageNumber, _ = strconv.Atoi(pageLink.URI)
+					pageLink.PageNumber-- // Page numbers in links seem to be 1-based, but we use 0-based internally
 				}
 				pageLink.URI = ""
 			}
