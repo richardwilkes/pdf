@@ -1,0 +1,8 @@
+# Force LF line endings on checkout across all platforms. Without this, the
+# Windows CI runners (core.autocrlf=true) check out .go files with CRLF, which
+# gofmt/gofumpt rejects, failing the linter on Windows only.
+* text=auto eol=lf
+
+# Vendored binary artifacts must never be line-ending converted.
+*.a binary
+*.pdf binary
