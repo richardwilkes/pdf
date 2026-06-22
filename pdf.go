@@ -205,6 +205,7 @@ var (
 	ErrUnableToLoadPage         = errors.New("unable to load page")
 	ErrUnableToCreateImage      = errors.New("unable to create image")
 	ErrInvalidPageSize          = errors.New("invalid page size")
+	ErrDocumentReleased         = errors.New("document has been released")
 )
 
 // AuthenticationStatus holds the result of an authentication attempt. A non-zero value indicates success and the masks
@@ -296,17 +297,28 @@ func New(buffer []byte, maxCacheSize uint64) (*Document, error) {
 	return &d, nil
 }
 
-// RequiresAuthentication returns true if a password is required.
+// released reports whether the underlying document has been released. The caller must hold d.lock.
+func (d *document) released() bool {
+	return d.ctx == nil || d.doc == nil
+}
+
+// RequiresAuthentication returns true if a password is required. Returns false if the document has been released.
 func (d *Document) RequiresAuthentication() bool {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	if d.released() {
+		return false
+	}
 	return C.wrapped_fz_needs_password(d.ctx, d.doc) != 0
 }
 
-// Authenticate with either the user or owner password.
+// Authenticate with either the user or owner password. Returns a zero status if the document has been released.
 func (d *Document) Authenticate(password string) AuthenticationStatus {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	if d.released() {
+		return 0
+	}
 	pw := C.CString(password)
 	defer C.free(unsafe.Pointer(pw))
 	return AuthenticationStatus(C.wrapped_fz_authenticate_password(d.ctx, d.doc, pw))
@@ -316,6 +328,9 @@ func (d *Document) Authenticate(password string) AuthenticationStatus {
 func (d *Document) TableOfContents(dpi int) []*TOCEntry {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	if d.released() {
+		return nil
+	}
 	outline := C.wrapped_fz_load_outline(d.ctx, d.doc)
 	if outline == nil {
 		return nil
@@ -359,6 +374,9 @@ func sanitizeString(in *C.char) string {
 func (d *Document) PageCount() int {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	if d.released() {
+		return 0
+	}
 	if count := int(C.wrapped_fz_count_pages(d.ctx, d.doc)); count > 0 {
 		return count
 	}
@@ -375,6 +393,9 @@ func dpiToScale(dpi int) float64 {
 func (d *Document) RenderPage(pageNumber, dpi, maxHits int, search string) (*RenderedPage, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	if d.released() {
+		return nil, ErrDocumentReleased
+	}
 	pageCount := int(C.wrapped_fz_count_pages(d.ctx, d.doc))
 	if pageNumber < 0 || pageNumber >= pageCount {
 		return nil, ErrInvalidPageNumber
@@ -403,6 +424,9 @@ func (d *Document) RenderPage(pageNumber, dpi, maxHits int, search string) (*Ren
 func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits int, search string) (*RenderedPage, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	if d.released() {
+		return nil, ErrDocumentReleased
+	}
 	pageCount := int(C.wrapped_fz_count_pages(d.ctx, d.doc))
 	if pageNumber < 0 || pageNumber >= pageCount {
 		return nil, ErrInvalidPageNumber

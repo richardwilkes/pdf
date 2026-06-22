@@ -127,6 +127,42 @@ func TestMalformedPDF(t *testing.T) {
 	}
 }
 
+func TestUseAfterRelease(t *testing.T) {
+	data, err := os.ReadFile("testfiles/GLAIVE_Mini_v2_3_for_GURPS_4e.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := pdf.New(data, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Releasing and then calling methods must not crash; it must return safe zero values / ErrDocumentReleased.
+	doc.Release()
+
+	// Calling Release again must be a safe no-op.
+	doc.Release()
+
+	if got := doc.PageCount(); got != 0 {
+		t.Errorf("expected PageCount of 0 after release, got %d", got)
+	}
+	if got := doc.RequiresAuthentication(); got {
+		t.Errorf("expected RequiresAuthentication of false after release, got %v", got)
+	}
+	if got := doc.Authenticate(""); got != 0 {
+		t.Errorf("expected Authenticate status of 0 after release, got %v", got)
+	}
+	if got := doc.TableOfContents(100); got != nil {
+		t.Errorf("expected nil TableOfContents after release, got %v", got)
+	}
+	if _, err = doc.RenderPage(0, 100, 20, ""); !errors.Is(err, pdf.ErrDocumentReleased) {
+		t.Errorf("expected ErrDocumentReleased from RenderPage after release, got %v", err)
+	}
+	if _, err = doc.RenderPageForSize(0, 800, 800, 20, ""); !errors.Is(err, pdf.ErrDocumentReleased) {
+		t.Errorf("expected ErrDocumentReleased from RenderPageForSize after release, got %v", err)
+	}
+}
+
 func checkTOCEntry(t *testing.T, toc []*pdf.TOCEntry, index int, prefix string, pageNumber, pageX, pageY int) {
 	t.Helper()
 	if !strings.HasPrefix(toc[index].Title, prefix) {
