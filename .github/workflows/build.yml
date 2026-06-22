@@ -46,6 +46,14 @@ jobs:
           echo "$RUNNER_TEMP/$name/bin" >> "$GITHUB_PATH"
           echo "CC=aarch64-w64-mingw32-gcc" >> "$GITHUB_ENV"
 
-      # build.sh builds, lints, and runs the tests with the race detector.
-      - name: build.sh --all
-        run: ./build.sh --all
+      # Lint via the official action rather than build.sh's --lint step: the
+      # latter downloads golangci-lint through its upstream install.sh, whose
+      # checksum verification fails for unauthenticated release downloads in CI.
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
+      # build.sh builds and runs the tests with the race detector.
+      - name: build.sh --race
+        run: ./build.sh --race
