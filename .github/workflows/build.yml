@@ -54,6 +54,13 @@ jobs:
         with:
           version: latest
 
-      # build.sh builds and runs the tests with the race detector.
-      - name: build.sh --race
-        run: ./build.sh --race
+      # build.sh builds and runs the tests with the race detector. The race
+      # detector isn't supported on windows/arm64, so fall back to plain tests
+      # there.
+      - name: build.sh
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ] && [ "$RUNNER_ARCH" = "ARM64" ]; then
+            ./build.sh --test
+          else
+            ./build.sh --race
+          fi
