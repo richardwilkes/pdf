@@ -208,9 +208,17 @@ var (
 	ErrDocumentReleased         = errors.New("document has been released")
 )
 
-// OverallMaxHits is the maximum number of hits returned, even if the API is called with a larger value. This is here to
-// safeguard against untrusted input that might otherwise cause an out of memory error.
-var OverallMaxHits = 1000
+var (
+	// OverallMaxHits is the maximum number of hits returned, even if the API is called with a larger value. This is
+	// here to safeguard against untrusted input that might otherwise cause an out of memory error.
+	OverallMaxHits = 1000
+	// OverallMaxLinks is the maximum number of links returned. This is here to safeguard against untrusted input that
+	// might otherwise cause an out of memory error.
+	OverallMaxLinks = 1000
+	// OverallMaxTOCEntries is the maximum number of TOC entries returned. This is here to safeguard against untrusted
+	// input that might otherwise cause an out of memory error.
+	OverallMaxTOCEntries = 1000
+)
 
 // AuthenticationStatus holds the result of an authentication attempt. A non-zero value indicates success and the masks
 // can be used to determine further details.
@@ -266,7 +274,8 @@ type RenderedPage struct {
 
 // New returns new PDF document from the provided raw bytes. Pass in 0 for maxCacheSize for no limit.
 func New(buffer []byte, maxCacheSize uint64) (*Document, error) {
-	if !bytes.HasPrefix(buffer, []byte("%PDF")) {
+	// Allow some garbage to be before the PDF content, as Acrobat and MuPDF itself allow it
+	if !bytes.Contains(buffer[:min(1024, len(buffer))], []byte("%PDF")) {
 		return nil, ErrNotPDFData
 	}
 	d := Document{
@@ -340,11 +349,14 @@ func (d *Document) TableOfContents(dpi int) []*TOCEntry {
 		return nil
 	}
 	defer C.fz_drop_outline(d.ctx, outline)
-	return buildTOCEntries(outline, float32(dpiToScale(dpi)))
+	entries, _ := buildTOCEntries(outline, float32(dpiToScale(dpi)), OverallMaxTOCEntries)
+	return entries
 }
 
-func buildTOCEntries(outline *C.fz_outline, scale float32) []*TOCEntry {
-	var entries []*TOCEntry
+func buildTOCEntries(outline *C.fz_outline, scale float32, maxAllowed int) (entries []*TOCEntry, remaining int) {
+	if maxAllowed < 1 {
+		return nil, 0
+	}
 	for outline != nil {
 		entry := &TOCEntry{
 			PageNumber: int(outline.page.page),
@@ -355,12 +367,18 @@ func buildTOCEntries(outline *C.fz_outline, scale float32) []*TOCEntry {
 			entry.Title = sanitizeString(outline.title)
 		}
 		entries = append(entries, entry)
+		maxAllowed--
+		if maxAllowed <= 0 {
+			break
+		}
 		if outline.down != nil {
-			entry.Children = buildTOCEntries(outline.down, scale)
+			if entry.Children, maxAllowed = buildTOCEntries(outline.down, scale, maxAllowed); maxAllowed <= 0 {
+				break
+			}
 		}
 		outline = outline.next
 	}
-	return entries
+	return entries, max(maxAllowed, 0)
 }
 
 func sanitizeString(in *C.char) string {
@@ -545,6 +563,9 @@ func quadToRect(q C.fz_quad, scale float64) image.Rectangle {
 }
 
 func (d *Document) loadLinks(page *C.fz_page, scale float64) []*PageLink {
+	if OverallMaxLinks < 1 {
+		return nil
+	}
 	var links []*PageLink
 	if link := C.wrapped_fz_load_links(d.ctx, page); link != nil {
 		firstLink := link
@@ -572,7 +593,9 @@ func (d *Document) loadLinks(page *C.fz_page, scale float64) []*PageLink {
 				pageLink.URI = ""
 			}
 			if pageLink.PageNumber != -1 || pageLink.URI != "" {
-				links = append(links, pageLink)
+				if links = append(links, pageLink); len(links) >= OverallMaxLinks {
+					break
+				}
 			}
 			link = link.next
 		}
