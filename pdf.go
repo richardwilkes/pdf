@@ -203,8 +203,8 @@ typedef struct {
 } resolved_link;
 
 // Resolves an internal link URI to a 0-based page number and a destination point on that page. page is -1 (and the
-// point 0,0) if uri is NULL, it cannot be resolved, or it threw. The point is 0,0 when the destination carries no
-// explicit coordinate (e.g. a /Fit destination).
+// point 0,0) if uri is NULL, it cannot be resolved, or it threw. When the destination carries no explicit coordinate
+// (e.g. a /Fit destination) MuPDF leaves x/y non-finite (NaN); the Go caller maps that to 0,0 (see scaledFloor).
 resolved_link wrapped_fz_resolve_link(fz_context *ctx, fz_document *doc, const char *uri) {
 	resolved_link r = { -1, 0, 0 };
 	if (uri == NULL) {
@@ -419,8 +419,8 @@ func buildTOCEntries(outline *C.fz_outline, scale float32, maxAllowed int) (entr
 	for outline != nil {
 		entry := &TOCEntry{
 			PageNumber: int(outline.page.page),
-			PageX:      int(math.Floor(float64(outline.x) * float64(scale))),
-			PageY:      int(math.Floor(float64(outline.y) * float64(scale))),
+			PageX:      scaledFloor(float64(outline.x), float64(scale)),
+			PageY:      scaledFloor(float64(outline.y), float64(scale)),
 		}
 		if outline.title != nil {
 			entry.Title = sanitizeString(outline.title)
@@ -626,6 +626,19 @@ func quadToRect(q C.fz_quad, scale float64) image.Rectangle {
 	)
 }
 
+// scaledFloor multiplies v by scale, floors the result, and converts it to an int. MuPDF reports a destination that
+// carries no explicit coordinate (e.g. a /Fit destination, in both link targets and TOC entries) as a non-finite
+// value; Go's conversion of a non-finite (or out-of-range) float to int is architecture-defined — 0 on arm64 but
+// math.MinInt64 on amd64 — so those values are mapped to 0 here to keep the returned coordinates deterministic across
+// architectures.
+func scaledFloor(v, scale float64) int {
+	r := math.Floor(v * scale)
+	if math.IsNaN(r) || r < math.MinInt || r > math.MaxInt {
+		return 0
+	}
+	return int(r)
+}
+
 func (d *Document) loadLinks(page *C.fz_page, scale float64) []*PageLink {
 	if OverallMaxLinks < 1 {
 		return nil
@@ -652,8 +665,8 @@ func (d *Document) loadLinks(page *C.fz_page, scale float64) []*PageLink {
 				res := C.wrapped_fz_resolve_link(d.ctx, d.doc, link.uri)
 				pageLink.PageNumber = int(res.page)
 				pageLink.DestPoint = image.Pt(
-					int(math.Floor(float64(res.x)*scale)),
-					int(math.Floor(float64(res.y)*scale)),
+					scaledFloor(float64(res.x), scale),
+					scaledFloor(float64(res.y), scale),
 				)
 			}
 			if pageLink.PageNumber >= 0 || pageLink.URI != "" {
