@@ -205,6 +205,85 @@ func TestRenderPageForSizeLimits(t *testing.T) {
 	}
 }
 
+// internalLinkPDF is a minimal two-page document with two internal links on page 0, both targeting the second page:
+// one via an explicit /XYZ destination ([4 0 R /XYZ 30 150 0]) and one via a named destination
+// (/A /GoTo /D (Chapter2), which resolves to a /Fit destination with no point). No xref is supplied (startxref 0) so
+// MuPDF rebuilds it; only the link resolution matters here.
+const internalLinkPDF = `%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /Names << /Dests 6 0 R >> >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [5 0 R 7 0 R] >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>
+endobj
+5 0 obj
+<< /Type /Annot /Subtype /Link /Rect [10 10 90 30] /Border [0 0 0] /Dest [4 0 R /XYZ 30 150 0] >>
+endobj
+6 0 obj
+<< /Names [(Chapter2) [4 0 R /Fit]] >>
+endobj
+7 0 obj
+<< /Type /Annot /Subtype /Link /Rect [10 40 90 60] /Border [0 0 0] /A << /S /GoTo /D (Chapter2) >> >>
+endobj
+trailer
+<< /Root 1 0 R /Size 8 >>
+startxref
+0
+%%EOF
+`
+
+func TestInternalLinks(t *testing.T) {
+	doc, err := pdf.New([]byte(internalLinkPDF), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Release()
+
+	page, err := doc.RenderPage(0, 72, 0, "") // 72 dpi => scale 1.0, so DestPoint values are page points
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Page 0 carries two internal links — one explicit /XYZ destination and one named destination — both pointing at
+	// the second page (0-based index 1). Each must resolve to PageNumber 1 with an empty URI. The named destination in
+	// particular was silently dropped by the previous "#page=" string parsing, and the page index must be 0-based: the
+	// target is the second page object, so 1 rather than 0.
+	if len(page.Links) != 2 {
+		t.Fatalf("expected 2 internal links, got %d", len(page.Links))
+	}
+	// The /XYZ destination (left 30, top 150 on a 200-tall page) resolves to (30, 50) in top-left/y-down image space;
+	// the named /Fit destination has no explicit point and so resolves to (0, 0). Match by DestPoint rather than order.
+	var sawXYZ, sawFit bool
+	for i, l := range page.Links {
+		if l.PageNumber != 1 {
+			t.Errorf("link %d: expected PageNumber 1 (0-based second page), got %d", i, l.PageNumber)
+		}
+		if l.URI != "" {
+			t.Errorf("link %d: expected empty URI for an internal link, got %q", i, l.URI)
+		}
+		switch l.DestPoint {
+		case image.Pt(30, 50):
+			sawXYZ = true
+		case image.Pt(0, 0):
+			sawFit = true
+		default:
+			t.Errorf("link %d: unexpected DestPoint %v", i, l.DestPoint)
+		}
+	}
+	if !sawXYZ {
+		t.Error("expected a link with the /XYZ DestPoint (30, 50)")
+	}
+	if !sawFit {
+		t.Error("expected a link with the /Fit DestPoint (0, 0)")
+	}
+}
+
 func checkTOCEntry(t *testing.T, toc []*pdf.TOCEntry, index int, prefix string, pageNumber, pageX, pageY int) {
 	t.Helper()
 	if !strings.HasPrefix(toc[index].Title, prefix) {

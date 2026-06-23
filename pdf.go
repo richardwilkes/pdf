@@ -179,6 +179,52 @@ fz_link *wrapped_fz_load_links(fz_context *ctx, fz_page *page) {
 	}
 	return links;
 }
+
+// Returns 1 if the link URI is external, 0 if internal (or if uri is NULL or the check threw).
+int wrapped_fz_is_external_link(fz_context *ctx, const char *uri) {
+	int result = 0;
+	if (uri == NULL) {
+		return 0;
+	}
+	fz_var(result);
+	fz_try(ctx) {
+		result = fz_is_external_link(ctx, uri);
+	}
+	fz_catch(ctx) {
+		result = 0;
+	}
+	return result;
+}
+
+typedef struct {
+	int page;
+	float x;
+	float y;
+} resolved_link;
+
+// Resolves an internal link URI to a 0-based page number and a destination point on that page. page is -1 (and the
+// point 0,0) if uri is NULL, it cannot be resolved, or it threw. The point is 0,0 when the destination carries no
+// explicit coordinate (e.g. a /Fit destination).
+resolved_link wrapped_fz_resolve_link(fz_context *ctx, fz_document *doc, const char *uri) {
+	resolved_link r = { -1, 0, 0 };
+	if (uri == NULL) {
+		return r;
+	}
+	fz_var(r);
+	fz_try(ctx) {
+		float x = 0, y = 0;
+		fz_location loc = fz_resolve_link(ctx, doc, uri, &x, &y);
+		r.page = fz_page_number_from_location(ctx, doc, loc);
+		r.x = x;
+		r.y = y;
+	}
+	fz_catch(ctx) {
+		r.page = -1;
+		r.x = 0;
+		r.y = 0;
+	}
+	return r;
+}
 */
 import "C"
 
@@ -188,7 +234,6 @@ import (
 	"image"
 	"math"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -269,7 +314,12 @@ type TOCEntry struct {
 type PageLink struct {
 	URI        string
 	PageNumber int
-	Bounds     image.Rectangle
+	// Bounds is the clickable hot-zone of the link on the page it appears on, in rendered-image pixel space.
+	Bounds image.Rectangle
+	// DestPoint is the point on the destination page (PageNumber) that an internal link targets, in rendered-image
+	// pixel space. It is the zero value (0,0) for external links and for internal links whose destination has no
+	// explicit coordinate (such as a /Fit destination).
+	DestPoint image.Point
 }
 
 // RenderedPage holds the rendered page.
@@ -592,27 +642,27 @@ func (d *Document) loadLinks(page *C.fz_page, scale float64) []*PageLink {
 		for link != nil {
 			pageLink := &PageLink{
 				PageNumber: -1,
-				URI:        sanitizeString(link.uri),
 				Bounds: image.Rect(int(math.Floor(float64(link.rect.x0)*scale)),
 					int(math.Floor(float64(link.rect.y0)*scale)),
 					int(math.Ceil(float64(link.rect.x1)*scale)),
 					int(math.Ceil(float64(link.rect.y1)*scale)),
 				),
 			}
-			if strings.HasPrefix(pageLink.URI, "#") {
-				const pagePrefix = "#page="
-				if i := strings.Index(pageLink.URI, pagePrefix); i != -1 {
-					pageLink.URI = pageLink.URI[i+len(pagePrefix):]
-					if i = strings.Index(pageLink.URI, "&"); i != -1 {
-						pageLink.URI = pageLink.URI[:i]
-					}
-					//nolint:errcheck // Failure here results in 0, which is acceptable
-					pageLink.PageNumber, _ = strconv.Atoi(pageLink.URI)
-					pageLink.PageNumber-- // Page numbers in links seem to be 1-based, but we use 0-based internally
-				}
-				pageLink.URI = ""
+			// External links keep their URI; internal links are resolved to a page. fz_resolve_link returns the
+			// target location and fz_page_number_from_location turns it into MuPDF's 0-based page number, which is the
+			// same numbering fz_load_page and this package's API use, so no adjustment is needed. Internal links that
+			// cannot be resolved come back as -1 and, with an empty URI, are dropped by the test below.
+			if C.wrapped_fz_is_external_link(d.ctx, link.uri) != 0 {
+				pageLink.URI = sanitizeString(link.uri)
+			} else {
+				res := C.wrapped_fz_resolve_link(d.ctx, d.doc, link.uri)
+				pageLink.PageNumber = int(res.page)
+				pageLink.DestPoint = image.Pt(
+					int(math.Floor(float64(res.x)*scale)),
+					int(math.Floor(float64(res.y)*scale)),
+				)
 			}
-			if pageLink.PageNumber != -1 || pageLink.URI != "" {
+			if pageLink.PageNumber >= 0 || pageLink.URI != "" {
 				if links = append(links, pageLink); len(links) >= OverallMaxLinks {
 					break
 				}

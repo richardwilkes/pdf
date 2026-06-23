@@ -62,8 +62,8 @@ one at a time.
 DPI is converted to a scale factor via `dpiToScale` (`dpi/72`, clamped to 10x to guard
 against bad EDID data). `RenderPage` renders at a fixed DPI; `RenderPageForSize` computes a
 scale to fit within a max width/height. The same scale is applied to search-hit quads, link
-rectangles, and TOC x/y positions so all returned coordinates are in rendered-image pixel
-space. Rendered output is always `*image.NRGBA` (RGB device colorspace, alpha=1). MuPDF renders
+rectangles, internal-link destination points, and TOC x/y positions so all returned coordinates
+are in rendered-image pixel space. Rendered output is always `*image.NRGBA` (RGB device colorspace, alpha=1). MuPDF renders
 with premultiplied alpha, so `renderPage` runs `unpremultiply` on each non-opaque, non-transparent
 pixel to convert back to the straight alpha `image.NRGBA` expects.
 
@@ -97,8 +97,14 @@ allocate the pixmap—and both render paths also enforce it centrally in `render
 
 ### Conventions
 
-- Page numbers are 0-based internally; PDF link URIs of the form `#page=N` are 1-based and
-  are decremented when parsed in `loadLinks`.
+- Page numbers are 0-based internally. `loadLinks` classifies each link with
+  `fz_is_external_link`: external links keep their URI (`PageNumber` stays -1); internal links are
+  resolved via `fz_resolve_link` + `fz_page_number_from_location` to a 0-based page number (URI
+  emptied). That resolved location is already 0-based, so no decrement is applied — unlike the
+  1-based `#page=N` URI text the old hand-parser consumed. Internal links that cannot be resolved
+  (page -1, empty URI) are dropped. `fz_resolve_link` also yields a destination point on the target
+  page (`PageLink.DestPoint`), in the same top-left/y-down page space as link rects; it is 0,0 when
+  the destination carries no explicit coordinate (e.g. a /Fit destination) or for external links.
 - All strings coming from MuPDF pass through `sanitizeString`, which strips non-printable/
   control runes and trims whitespace.
 - Errors are predefined sentinel `error` values at the top of the file; return those rather

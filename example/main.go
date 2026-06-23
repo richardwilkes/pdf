@@ -76,7 +76,7 @@ func extract(path, search string) error {
 		fmt.Println(divider)
 		for _, link := range page.Links {
 			if link.PageNumber >= 0 {
-				fmt.Printf("link to page %d at %v\n", link.PageNumber, link.Bounds)
+				fmt.Printf("link to page %d (destination %v) at %v\n", link.PageNumber, link.DestPoint, link.Bounds)
 			} else {
 				fmt.Printf("link to %s at %v\n", link.URI, link.Bounds)
 			}
