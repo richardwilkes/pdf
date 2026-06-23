@@ -254,6 +254,8 @@ var (
 	ErrDocumentReleased         = errors.New("document has been released")
 )
 
+// Each of these variables is global and are not safe to modify when other calls to this code are being made. Generally,
+// they should be modified at startup before any other use of this package.
 var (
 	// OverallMaxHits is the maximum number of hits returned, even if the API is called with a larger value. This is
 	// here to safeguard against untrusted input that might otherwise cause an out of memory error.
@@ -470,44 +472,47 @@ func dpiToScale(dpi int) float64 {
 // RenderPage renders the specified page at the requested dpi. If search is not empty, then the bounding boxes of up to
 // maxHits matching text on the page will be returned.
 func (d *Document) RenderPage(pageNumber, dpi, maxHits int, search string) (*RenderedPage, error) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	if d.released() {
-		return nil, ErrDocumentReleased
-	}
-	pageCount := int(C.wrapped_fz_count_pages(d.ctx, d.doc))
-	if pageNumber < 0 || pageNumber >= pageCount {
-		return nil, ErrInvalidPageNumber
-	}
-	page := C.wrapped_fz_load_page(d.ctx, d.doc, C.int(pageNumber))
-	if page == nil {
-		return nil, ErrUnableToLoadPage
-	}
-	defer C.fz_drop_page(d.ctx, page)
-	displayList := C.wrapped_fz_new_display_list_from_page(d.ctx, page)
-	defer C.fz_drop_display_list(d.ctx, displayList)
-	scale := dpiToScale(dpi)
-	img, err := d.renderPage(displayList, scale)
-	if err != nil {
-		return nil, err
-	}
-	return &RenderedPage{
-		Image:      img,
-		SearchHits: d.searchDisplayList(displayList, scale, search, maxHits),
-		Links:      d.loadLinks(page, scale),
-	}, nil
+	return d.render(pageNumber, maxHits, search, func(*C.fz_page) (float64, error) {
+		return dpiToScale(dpi), nil
+	})
 }
 
 // RenderPageForSize renders the specified page to fit within the requested size. If search is not empty, then the
 // bounding boxes of up to maxHits matching text on the page will be returned.
 func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits int, search string) (*RenderedPage, error) {
+	return d.render(pageNumber, maxHits, search, func(page *C.fz_page) (float64, error) {
+		if maxWidth <= 0 || maxHeight <= 0 {
+			return 0, ErrInvalidPageSize
+		}
+		r := C.wrapped_fz_bound_page(d.ctx, page)
+		w := float64(r.x1 - r.x0)
+		h := float64(r.y1 - r.y0)
+		if w <= 0 || h <= 0 {
+			return 0, ErrInvalidPageSize
+		}
+		scale := float64(maxWidth) / w
+		if ratio := float64(maxHeight) / h; ratio < scale {
+			scale = ratio
+		}
+		// The rendered image is scaled to fit within maxWidth×maxHeight, so its pixel count is bounded by the
+		// requested box. Reject an over-large request here, before building the display list or asking MuPDF to
+		// allocate the pixmap.
+		if (w*scale)*(h*scale) > float64(OverallMaxPixels) {
+			return 0, ErrImageTooLarge
+		}
+		return scale, nil
+	})
+}
+
+// render is the shared body of RenderPage and RenderPageForSize. It validates the page number, loads the page, asks
+// scaleFor to compute the render scale (which may inspect the page bounds and reject the request), builds the display
+// list, renders, and assembles the result. The document lock is held throughout so the underlying C calls are
+// serialized.
+func (d *Document) render(pageNumber, maxHits int, search string, scaleFor func(page *C.fz_page) (float64, error)) (*RenderedPage, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.released() {
 		return nil, ErrDocumentReleased
-	}
-	if maxWidth <= 0 || maxHeight <= 0 {
-		return nil, ErrInvalidPageSize
 	}
 	pageCount := int(C.wrapped_fz_count_pages(d.ctx, d.doc))
 	if pageNumber < 0 || pageNumber >= pageCount {
@@ -518,20 +523,9 @@ func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits in
 		return nil, ErrUnableToLoadPage
 	}
 	defer C.fz_drop_page(d.ctx, page)
-	r := C.wrapped_fz_bound_page(d.ctx, page)
-	w := float64(r.x1 - r.x0)
-	h := float64(r.y1 - r.y0)
-	if w <= 0 || h <= 0 {
-		return nil, ErrInvalidPageSize
-	}
-	scale := float64(maxWidth) / w
-	if ratio := float64(maxHeight) / h; ratio < scale {
-		scale = ratio
-	}
-	// The rendered image is scaled to fit within maxWidth×maxHeight, so its pixel count is bounded by the requested
-	// box. Reject an over-large request here, before building the display list or asking MuPDF to allocate the pixmap.
-	if (w*scale)*(h*scale) > float64(OverallMaxPixels) {
-		return nil, ErrImageTooLarge
+	scale, err := scaleFor(page)
+	if err != nil {
+		return nil, err
 	}
 	displayList := C.wrapped_fz_new_display_list_from_page(d.ctx, page)
 	defer C.fz_drop_display_list(d.ctx, displayList)
