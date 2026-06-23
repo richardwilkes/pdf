@@ -3,7 +3,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/richardwilkes/pdf.svg)](https://pkg.go.dev/github.com/richardwilkes/pdf)
 [![Build](https://github.com/richardwilkes/pdf/actions/workflows/build.yml/badge.svg)](https://github.com/richardwilkes/pdf/actions/workflows/build.yml)
 
-A small Go package that wraps [MuPDF](https://mupdf.com) via cgo to render PDF pages to images and to extract
+A small Go package that wraps [MuPDF](https://mupdf.com) v1.27.2 via cgo to render PDF pages to images and to extract
 text-search hits, links, and the table of contents.
 
 ## Features
