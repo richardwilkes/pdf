@@ -326,6 +326,9 @@ type PageLink struct {
 
 // RenderedPage holds the rendered page.
 type RenderedPage struct {
+	// Image is the rendered page. It is rendered with an alpha channel, and most PDF pages do not paint their own
+	// background, so areas with no content are transparent rather than white. Callers that want an opaque page (for
+	// example, when encoding to a format without alpha) should composite the image onto their desired background color.
 	Image      *image.NRGBA
 	SearchHits []image.Rectangle
 	Links      []*PageLink
@@ -528,6 +531,9 @@ func (d *Document) render(pageNumber, maxHits int, search string, scaleFor func(
 		return nil, err
 	}
 	displayList := C.wrapped_fz_new_display_list_from_page(d.ctx, page)
+	if displayList == nil {
+		return nil, ErrUnableToCreateImage
+	}
 	defer C.fz_drop_display_list(d.ctx, displayList)
 	img, err := d.renderPage(displayList, scale)
 	if err != nil {
@@ -618,11 +624,17 @@ func quadToRect(q C.fz_quad, scale float64) image.Rectangle {
 	minY := math.Min(math.Min(float64(q.ul.y), float64(q.ur.y)), math.Min(float64(q.ll.y), float64(q.lr.y)))
 	maxX := math.Max(math.Max(float64(q.ul.x), float64(q.ur.x)), math.Max(float64(q.ll.x), float64(q.lr.x)))
 	maxY := math.Max(math.Max(float64(q.ul.y), float64(q.ur.y)), math.Max(float64(q.ll.y), float64(q.lr.y)))
+	return scaleRect(minX, minY, maxX, maxY, scale)
+}
+
+// scaleRect scales an axis-aligned rectangle by scale and converts it to integer pixel space, expanding outward so the
+// box never clips its content: the min corner is floored and the max corner is ceiled.
+func scaleRect(x0, y0, x1, y1, scale float64) image.Rectangle {
 	return image.Rect(
-		int(math.Floor(minX*scale)),
-		int(math.Floor(minY*scale)),
-		int(math.Ceil(maxX*scale)),
-		int(math.Ceil(maxY*scale)),
+		int(math.Floor(x0*scale)),
+		int(math.Floor(y0*scale)),
+		int(math.Ceil(x1*scale)),
+		int(math.Ceil(y1*scale)),
 	)
 }
 
@@ -649,11 +661,8 @@ func (d *Document) loadLinks(page *C.fz_page, scale float64) []*PageLink {
 		for link != nil {
 			pageLink := &PageLink{
 				PageNumber: -1,
-				Bounds: image.Rect(int(math.Floor(float64(link.rect.x0)*scale)),
-					int(math.Floor(float64(link.rect.y0)*scale)),
-					int(math.Ceil(float64(link.rect.x1)*scale)),
-					int(math.Ceil(float64(link.rect.y1)*scale)),
-				),
+				Bounds: scaleRect(float64(link.rect.x0), float64(link.rect.y0),
+					float64(link.rect.x1), float64(link.rect.y1), scale),
 			}
 			// External links keep their URI; internal links are resolved to a page. fz_resolve_link returns the
 			// target location and fz_page_number_from_location turns it into MuPDF's 0-based page number, which is the
