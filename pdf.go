@@ -447,7 +447,10 @@ func sanitizeString(in *C.char) string {
 	str := C.GoString(in)
 	sanitized := make([]rune, 0, len(str))
 	for _, ch := range str {
-		if !unicode.IsControl(ch) && unicode.IsPrint(ch) {
+		// U+FFFD (the Unicode replacement character) stands in for bytes that could not be decoded as valid UTF-8,
+		// such as the unmappable dot-leader glyphs some PDFs place in outline titles. It is printable and non-control,
+		// so it would otherwise survive the filter below; drop it explicitly to keep those spurious characters out.
+		if ch != unicode.ReplacementChar && !unicode.IsControl(ch) && unicode.IsPrint(ch) {
 			sanitized = append(sanitized, ch)
 		}
 	}

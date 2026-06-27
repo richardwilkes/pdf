@@ -106,7 +106,9 @@ allocate the pixmap—and both render paths also enforce it centrally in `render
   page (`PageLink.DestPoint`), in the same top-left/y-down page space as link rects; it is 0,0 when
   the destination carries no explicit coordinate (e.g. a /Fit destination) or for external links.
 - All strings coming from MuPDF pass through `sanitizeString`, which strips non-printable/
-  control runes and trims whitespace.
+  control runes (including U+FFFD, the replacement character that stands in for bytes that
+  could not be decoded as valid UTF-8, such as the unmappable dot-leader glyphs some PDFs put
+  in outline titles) and trims whitespace.
 - Errors are predefined sentinel `error` values at the top of the file; return those rather
   than constructing new ones.
 
