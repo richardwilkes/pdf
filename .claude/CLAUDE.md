@@ -26,6 +26,18 @@ toolchain. Targets go 1.26.
   and per-platform static libs ([lib/](lib/)) by downloading the `libmupdf_*.tar.gz` artifacts from
   the latest [richardwilkes/mupdf](https://github.com/richardwilkes/mupdf) GitHub release. Requires
   the GitHub CLI (`gh`). The resulting `lib/*.a` and headers are committed to the repo.
+- `setup-windows.ps1` — one-time Windows machine setup (Git, Go, UCRT mingw-w64 toolchain, PATH,
+  `CGO_ENABLED`). See the Windows toolchain note below.
+
+### Windows C toolchain (UCRT, not MSVCRT)
+
+The vendored Windows static libs are built with a **UCRT** mingw-w64 toolchain. The local C toolchain
+must also be UCRT mingw-w64 (MSYS2 `ucrt64`). The MSVCRT `mingw64` variant and TDM-GCC both fail at
+link time with `undefined reference to '__intrinsic_setjmpex'` — that symbol is emitted only against
+UCRT mingw-w64 headers and resolvable only by a UCRT runtime, so this is a C-runtime mismatch, not a
+missing `-l` flag. CI uses UCRT toolchains as well (the workflow fetches a `-ucrt-` llvm-mingw build
+for windows/arm64). Build from Git Bash or PowerShell with `ucrt64\bin` on `PATH`, not from the MSYS2
+shell. `setup-windows.ps1` configures this.
 
 ## Architecture
 

@@ -31,6 +31,17 @@ Static [MuPDF](https://mupdf.com) libraries are vendored in [lib/](lib/) for the
 Because the package uses cgo, a C toolchain must be available and `CGO_ENABLED=1` (the default for native builds).
 Cross-compilation requires an appropriate cross C toolchain.
 
+### Building on Windows
+
+The vendored Windows libraries are built with a **UCRT** mingw-w64 toolchain, so the local C toolchain must also be UCRT
+mingw-w64. The MSVCRT variant (`mingw64`) and TDM-GCC do **not** work: they fail at link time with `undefined reference
+to '__intrinsic_setjmpex'`, because that symbol is emitted only against UCRT mingw-w64 headers and resolvable only by a
+UCRT runtime.
+
+Run [setup-windows.ps1](setup-windows.ps1) from a PowerShell prompt to install Git, Go, and the UCRT mingw-w64 toolchain
+(MSYS2 `ucrt64`) and configure `PATH`/`CGO_ENABLED`. Then open a fresh Git Bash (or PowerShell) window and run
+`./build.sh`. Build from Git Bash or PowerShell, not from the MSYS2 shell.
+
 The vendored headers ([include/mupdf](include/mupdf)) and static libraries ([lib/](lib/)) are refreshed from a [sibling
 repo](https://github.com/richardwilkes/mupdf) via `update_from_release.sh`.
 
